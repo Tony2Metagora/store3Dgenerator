@@ -219,8 +219,8 @@ export default function App() {
             </div>
 
             <div className="field">
-              <label>Prompt généré (lecture seule)</label>
-              <textarea readOnly value={prompt} />
+              <label>Prompt généré (modifiable)</label>
+              <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} />
             </div>
           </div>
 
