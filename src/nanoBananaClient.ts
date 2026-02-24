@@ -232,7 +232,8 @@ export async function upscaleImage(imageDataUrl: string): Promise<string> {
     }
 
     if (pollJson.status === 'succeeded' && pollJson.image) {
-      return pollJson.image;
+      // Compresser l'image upscalée (PNG ~21Mo → JPEG <5Mo)
+      return await resizeAndCompress(pollJson.image);
     }
 
     // Sinon status = starting/processing → on continue le polling
