@@ -1,9 +1,18 @@
 let runtimeEndpoint = '';
 let runtimeApiKey = '';
+let runtimeUpscaleUrl = '';
 
 export function setApiConfig(endpoint: string, apiKey: string) {
   runtimeEndpoint = endpoint;
   runtimeApiKey = apiKey;
+}
+
+export function setUpscaleUrl(url: string) {
+  runtimeUpscaleUrl = url;
+}
+
+function getUpscaleUrl() {
+  return runtimeUpscaleUrl || '';
 }
 
 function getEndpoint() {
@@ -163,50 +172,19 @@ export async function callNanoBanana(
 }
 
 /**
- * Upscale / enhance une image via Gemini en lui demandant de la re-générer
- * en haute résolution avec plus de détails et de netteté.
+ * Upscale une image via le proxy Cloudflare Worker → Replicate Real-ESRGAN (x4).
  */
-export async function upscaleWithGemini(imageDataUrl: string): Promise<string> {
-  const ENDPOINT = getEndpoint();
-  const API_KEY = getApiKey();
+export async function upscaleImage(imageDataUrl: string): Promise<string> {
+  const UPSCALE_URL = getUpscaleUrl();
 
-  if (!ENDPOINT) {
-    throw new Error('Endpoint non configuré. Renseignez-le dans les paramètres API ci-dessus.');
-  }
-  if (!API_KEY) {
-    throw new Error('Clé API non configurée. Renseignez-la dans les paramètres API ci-dessus.');
+  if (!UPSCALE_URL) {
+    throw new Error('URL du service d\'upscale non configurée. Renseignez-la dans les paramètres API ci-dessus.');
   }
 
-  const { mimeType, data } = parseDataUrl(imageDataUrl);
-
-  const upscalePrompt = `Upscale this image to the highest resolution possible. Enhance sharpness, fine details, textures and clarity while preserving the exact same composition, colors, lighting and content. Do not change anything in the scene — only improve resolution and detail quality. Output a single ultra high-resolution image.`;
-
-  const payload = {
-    contents: [
-      {
-        parts: [
-          { text: upscalePrompt },
-          {
-            inlineData: {
-              mimeType,
-              data,
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseModalities: ['IMAGE', 'TEXT'],
-    },
-  };
-
-  const separator = ENDPOINT.includes('?') ? '&' : '?';
-  const url = `${ENDPOINT}${separator}key=${API_KEY}`;
-
-  const response = await fetch(url, {
+  const response = await fetch(UPSCALE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ image: imageDataUrl, scale: 4 }),
   });
 
   if (!response.ok) {
@@ -217,18 +195,13 @@ export async function upscaleWithGemini(imageDataUrl: string): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const json: any = await response.json();
 
-  const candidates = json.candidates ?? [];
-  for (const candidate of candidates) {
-    const parts = candidate.content?.parts ?? [];
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        const imgMime = part.inlineData.mimeType || 'image/jpeg';
-        let result = `data:${imgMime};base64,${part.inlineData.data}`;
-        result = await resizeAndCompress(result);
-        return result;
-      }
-    }
+  if (json.error) {
+    throw new Error(`Erreur upscale : ${json.error}`);
   }
 
-  throw new Error('Aucune image trouvée dans la réponse d\'upscale. Le modèle n\'a pas retourné d\'image améliorée.');
+  if (!json.image) {
+    throw new Error('Aucune image retournée par le service d\'upscale.');
+  }
+
+  return json.image;
 }

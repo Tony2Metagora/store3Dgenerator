@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { buildBrandPrompt } from './brands';
-import { callNanoBanana, setApiConfig, upscaleWithGemini } from './nanoBananaClient';
+import { callNanoBanana, setApiConfig, setUpscaleUrl, upscaleImage } from './nanoBananaClient';
 import './styles.css';
 
 // Image modèle 3D Metagora — fixe, jamais modifiée par l'utilisateur
@@ -20,6 +20,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [apiEndpoint, setApiEndpoint] = useState<string>(() => localStorage.getItem('nb_endpoint') || '');
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('nb_apikey') || '');
+  const [upscaleUrl, setUpscaleUrlState] = useState<string>(() => localStorage.getItem('nb_upscale_url') || '');
   const [showApiConfig, setShowApiConfig] = useState(false);
 
   // Charger l'image modèle en base64 au démarrage
@@ -38,8 +39,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('nb_endpoint', apiEndpoint);
     localStorage.setItem('nb_apikey', apiKey);
+    localStorage.setItem('nb_upscale_url', upscaleUrl);
     setApiConfig(apiEndpoint, apiKey);
-  }, [apiEndpoint, apiKey]);
+    setUpscaleUrl(upscaleUrl);
+  }, [apiEndpoint, apiKey, upscaleUrl]);
 
   // Met à jour le prompt dès que la marque ou la description change
   useEffect(() => {
@@ -88,13 +91,13 @@ export default function App() {
     }
   };
 
-  // Upscale via Gemini
+  // Upscale via Cloudflare Worker + Replicate Real-ESRGAN
   const handleUpscale = async () => {
     if (!resultImage) return;
     setUpscaling(true);
     setError(null);
     try {
-      const enhanced = await upscaleWithGemini(resultImage);
+      const enhanced = await upscaleImage(resultImage);
       setResultImage(enhanced);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue lors de l\'upscale.';
@@ -152,6 +155,16 @@ export default function App() {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Votre clé API Gemini"
+              />
+            </div>
+            <div className="field" style={{ marginTop: '1rem' }}>
+              <label htmlFor="upscaleUrl">URL du service d'upscale (Cloudflare Worker)</label>
+              <input
+                id="upscaleUrl"
+                type="url"
+                value={upscaleUrl}
+                onChange={(e) => setUpscaleUrlState(e.target.value)}
+                placeholder="https://upscale-worker.votre-domaine.workers.dev"
               />
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
