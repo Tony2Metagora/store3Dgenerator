@@ -173,6 +173,8 @@ export async function callNanoBanana(
 
 /**
  * Upscale une image via le proxy Cloudflare Worker → Replicate Real-ESRGAN (x4).
+ * Étape 1 : POST / → upload + créer la prediction → retourne { id }
+ * Étape 2 : Poll GET /status?id=xxx toutes les 3s jusqu'à succeeded/failed
  */
 export async function upscaleImage(imageDataUrl: string): Promise<string> {
   const UPSCALE_URL = getUpscaleUrl();
@@ -181,27 +183,60 @@ export async function upscaleImage(imageDataUrl: string): Promise<string> {
     throw new Error('URL du service d\'upscale non configurée. Renseignez-la dans les paramètres API ci-dessus.');
   }
 
-  const response = await fetch(UPSCALE_URL, {
+  // Étape 1 — Créer la prediction
+  const createRes = await fetch(UPSCALE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image: imageDataUrl, scale: 4 }),
   });
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Erreur upscale (${response.status}) : ${text || response.statusText}`);
+  if (!createRes.ok) {
+    const text = await createRes.text().catch(() => '');
+    throw new Error(`Erreur upscale création (${createRes.status}) : ${text || createRes.statusText}`);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const json: any = await response.json();
+  const createJson: any = await createRes.json();
 
-  if (json.error) {
-    throw new Error(`Erreur upscale : ${json.error}`);
+  if (createJson.error) {
+    throw new Error(`Erreur upscale : ${createJson.error}`);
   }
 
-  if (!json.image) {
-    throw new Error('Aucune image retournée par le service d\'upscale.');
+  const predictionId = createJson.id;
+  if (!predictionId) {
+    throw new Error('Aucun ID de prediction retourné par le service d\'upscale.');
   }
 
-  return json.image;
+  // Étape 2 — Polling jusqu'à complétion (max 3 min)
+  const baseUrl = UPSCALE_URL.replace(/\/+$/, '');
+  const maxAttempts = 60; // 60 × 3s = 3 min
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const pollRes = await fetch(`${baseUrl}/status?id=${predictionId}`);
+
+    if (!pollRes.ok) {
+      const text = await pollRes.text().catch(() => '');
+      throw new Error(`Erreur polling upscale (${pollRes.status}) : ${text || pollRes.statusText}`);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pollJson: any = await pollRes.json();
+
+    if (pollJson.error) {
+      throw new Error(`Erreur upscale : ${pollJson.error}`);
+    }
+
+    if (pollJson.status === 'failed') {
+      throw new Error(`Upscale échoué : ${pollJson.error || 'erreur inconnue'}`);
+    }
+
+    if (pollJson.status === 'succeeded' && pollJson.image) {
+      return pollJson.image;
+    }
+
+    // Sinon status = starting/processing → on continue le polling
+  }
+
+  throw new Error('Upscale timeout : le traitement a pris plus de 3 minutes.');
 }
