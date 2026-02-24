@@ -54,7 +54,7 @@ async function resizeAndCompress(dataUrl: string): Promise<string> {
   if (!ctx) throw new Error('Canvas context indisponible');
   ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-  let quality = 0.95;
+  let quality = 0.99;
   let result = canvas.toDataURL('image/jpeg', quality);
 
   while (result.length * 0.75 > MAX_BYTES && quality > 0.3) {
