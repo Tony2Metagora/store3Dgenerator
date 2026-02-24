@@ -1,5 +1,3 @@
-import type { NanoBananaResponse } from './types';
-
 let runtimeEndpoint = '';
 let runtimeApiKey = '';
 
@@ -38,7 +36,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 async function resizeAndCompress(dataUrl: string): Promise<string> {
   const img = await loadImage(dataUrl);
 
-  // Calcul des dimensions cibles
   const ratio = TARGET_HEIGHT / img.height;
   const targetWidth = Math.round(img.width * ratio);
 
@@ -49,11 +46,9 @@ async function resizeAndCompress(dataUrl: string): Promise<string> {
   if (!ctx) throw new Error('Canvas context indisponible');
   ctx.drawImage(img, 0, 0, targetWidth, TARGET_HEIGHT);
 
-  // Compression JPEG progressive pour rester < 5 Mo
   let quality = 0.92;
   let result = canvas.toDataURL('image/jpeg', quality);
 
-  // Estimation taille réelle : base64 → ~75% de la longueur string
   while (result.length * 0.75 > MAX_BYTES && quality > 0.3) {
     quality -= 0.05;
     result = canvas.toDataURL('image/jpeg', quality);
@@ -63,7 +58,18 @@ async function resizeAndCompress(dataUrl: string): Promise<string> {
 }
 
 /**
- * Appelle l'API Nano Banana et retourne une dataURL prête à afficher.
+ * Extrait le base64 pur et le mimeType d'une dataURL.
+ * "data:image/jpeg;base64,/9j/4A..." → { mimeType: "image/jpeg", data: "/9j/4A..." }
+ */
+function parseDataUrl(dataUrl: string): { mimeType: string; data: string } {
+  const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/s);
+  if (!match) throw new Error('Format d\'image invalide.');
+  return { mimeType: match[1], data: match[2] };
+}
+
+/**
+ * Appelle l'API Gemini (generateContent) et retourne une dataURL prête à afficher.
+ * L'authentification se fait via ?key=API_KEY dans l'URL.
  */
 export async function callNanoBanana(
   sourceImageBase64: string,
@@ -73,22 +79,42 @@ export async function callNanoBanana(
   const API_KEY = getApiKey();
 
   if (!ENDPOINT) {
-    throw new Error('Endpoint non configuré. Renseignez-le dans les paramètres API ci-dessus ou dans .env.');
+    throw new Error('Endpoint non configuré. Renseignez-le dans les paramètres API ci-dessus.');
   }
   if (!API_KEY) {
-    throw new Error('Clé API non configurée. Renseignez-la dans les paramètres API ci-dessus ou dans .env.');
+    throw new Error('Clé API non configurée. Renseignez-la dans les paramètres API ci-dessus.');
   }
 
+  // Extraire le base64 pur de la dataURL
+  const { mimeType, data } = parseDataUrl(sourceImageBase64);
+
+  // Payload Gemini generateContent
   const payload = {
-    model: 'nano-banana-pro',
-    prompt,
-    image: sourceImageBase64,
+    contents: [
+      {
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType,
+              data,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ['IMAGE', 'TEXT'],
+    },
   };
 
-  const response = await fetch(ENDPOINT, {
+  // Ajout de ?key=... à l'URL
+  const separator = ENDPOINT.includes('?') ? '&' : '?';
+  const url = `${ENDPOINT}${separator}key=${API_KEY}`;
+
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
@@ -99,35 +125,23 @@ export async function callNanoBanana(
     throw new Error(`Erreur API (${response.status}) : ${text || response.statusText}`);
   }
 
-  const data: NanoBananaResponse = await response.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const json: any = await response.json();
 
-  if (data.error) {
-    throw new Error(`Erreur Nano Banana : ${data.error}`);
+  // Parcourir la réponse Gemini pour trouver la partie image
+  const candidates = json.candidates ?? [];
+  for (const candidate of candidates) {
+    const parts = candidate.content?.parts ?? [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        const imgMime = part.inlineData.mimeType || 'image/jpeg';
+        let dataUrl = `data:${imgMime};base64,${part.inlineData.data}`;
+        // Post-traitement : redimensionner à 2056px de hauteur + compression < 5 Mo
+        dataUrl = await resizeAndCompress(dataUrl);
+        return dataUrl;
+      }
+    }
   }
 
-  let dataUrl: string;
-
-  if (data.image_base64) {
-    // L'API renvoie du base64
-    const prefix = data.image_base64.startsWith('data:') ? '' : 'data:image/jpeg;base64,';
-    dataUrl = prefix + data.image_base64;
-  } else if (data.image_url) {
-    // L'API renvoie une URL publique — on la fetch en blob puis on convertit
-    const imgResp = await fetch(data.image_url);
-    if (!imgResp.ok) throw new Error('Impossible de télécharger l\'image générée.');
-    const blob = await imgResp.blob();
-    dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } else {
-    throw new Error('Réponse API inattendue : aucune image reçue.');
-  }
-
-  // Post-traitement : redimensionner à 2056px de hauteur + compression < 5 Mo
-  dataUrl = await resizeAndCompress(dataUrl);
-
-  return dataUrl;
+  throw new Error('Aucune image trouvée dans la réponse de l\'API. Vérifiez que le modèle supporte la génération d\'images.');
 }

@@ -1,16 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { UNIVERS, buildBrandPrompt } from './brands';
+import { buildBrandPrompt } from './brands';
 import { callNanoBanana, setApiConfig } from './nanoBananaClient';
 import './styles.css';
-
-const universKeys = Object.keys(UNIVERS);
 
 export default function App() {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   const [sourceName, setSourceName] = useState<string>('');
-  const [universKey, setUniversKey] = useState<string>(universKeys[0]);
-  const [marque, setMarque] = useState<string>(UNIVERS[universKeys[0]].defaultMarque);
-  const [description, setDescription] = useState<string>(UNIVERS[universKeys[0]].defaultDescription);
+  const [marque, setMarque] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
   const [prompt, setPrompt] = useState<string>('');
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,13 +28,6 @@ export default function App() {
   useEffect(() => {
     setPrompt(buildBrandPrompt(marque, description));
   }, [marque, description]);
-
-  // Quand on change d'univers, on met la marque et la description par défaut
-  const handleUniversChange = (key: string) => {
-    setUniversKey(key);
-    setMarque(UNIVERS[key].defaultMarque);
-    setDescription(UNIVERS[key].defaultDescription);
-  };
 
   // Lecture du fichier uploadé en base64
   const readFile = (file: File) => {
@@ -118,7 +108,7 @@ export default function App() {
                 type="url"
                 value={apiEndpoint}
                 onChange={(e) => setApiEndpoint(e.target.value)}
-                placeholder="https://api.nanobanana.ai/v1/generate"
+                placeholder="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
               />
             </div>
             <div className="field">
@@ -161,25 +151,12 @@ export default function App() {
             )}
           </div>
 
-          {/* Étape 2 — Univers / Marque / Description */}
+          {/* Étape 2 — Marque / Description */}
           <div className="card" style={{ marginTop: '1rem' }}>
             <h2><span className="step-num">2</span> Définir la marque et le produit</h2>
 
             <div className="field">
-              <label htmlFor="univers">Univers</label>
-              <select
-                id="univers"
-                value={universKey}
-                onChange={(e) => handleUniversChange(e.target.value)}
-              >
-                {universKeys.map((key) => (
-                  <option key={key} value={key}>{UNIVERS[key].label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label htmlFor="marque">Marque (texte libre)</label>
+              <label htmlFor="marque">Marque</label>
               <input
                 id="marque"
                 type="text"
