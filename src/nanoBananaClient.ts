@@ -161,3 +161,74 @@ export async function callNanoBanana(
 
   throw new Error('Aucune image trouvée dans la réponse de l\'API. Vérifiez que le modèle supporte la génération d\'images.');
 }
+
+/**
+ * Upscale / enhance une image via Gemini en lui demandant de la re-générer
+ * en haute résolution avec plus de détails et de netteté.
+ */
+export async function upscaleWithGemini(imageDataUrl: string): Promise<string> {
+  const ENDPOINT = getEndpoint();
+  const API_KEY = getApiKey();
+
+  if (!ENDPOINT) {
+    throw new Error('Endpoint non configuré. Renseignez-le dans les paramètres API ci-dessus.');
+  }
+  if (!API_KEY) {
+    throw new Error('Clé API non configurée. Renseignez-la dans les paramètres API ci-dessus.');
+  }
+
+  const { mimeType, data } = parseDataUrl(imageDataUrl);
+
+  const upscalePrompt = `Upscale this image to the highest resolution possible. Enhance sharpness, fine details, textures and clarity while preserving the exact same composition, colors, lighting and content. Do not change anything in the scene — only improve resolution and detail quality. Output a single ultra high-resolution image.`;
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          { text: upscalePrompt },
+          {
+            inlineData: {
+              mimeType,
+              data,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ['IMAGE', 'TEXT'],
+    },
+  };
+
+  const separator = ENDPOINT.includes('?') ? '&' : '?';
+  const url = `${ENDPOINT}${separator}key=${API_KEY}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Erreur upscale (${response.status}) : ${text || response.statusText}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const json: any = await response.json();
+
+  const candidates = json.candidates ?? [];
+  for (const candidate of candidates) {
+    const parts = candidate.content?.parts ?? [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        const imgMime = part.inlineData.mimeType || 'image/jpeg';
+        let result = `data:${imgMime};base64,${part.inlineData.data}`;
+        result = await resizeAndCompress(result);
+        return result;
+      }
+    }
+  }
+
+  throw new Error('Aucune image trouvée dans la réponse d\'upscale. Le modèle n\'a pas retourné d\'image améliorée.');
+}

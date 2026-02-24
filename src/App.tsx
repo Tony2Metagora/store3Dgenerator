@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { buildBrandPrompt } from './brands';
-import { callNanoBanana, setApiConfig } from './nanoBananaClient';
+import { callNanoBanana, setApiConfig, upscaleWithGemini } from './nanoBananaClient';
 import './styles.css';
 
 // Image modèle 3D Metagora — fixe, jamais modifiée par l'utilisateur
@@ -15,6 +15,7 @@ export default function App() {
   const [prompt, setPrompt] = useState<string>('');
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [upscaling, setUpscaling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [apiEndpoint, setApiEndpoint] = useState<string>(() => localStorage.getItem('nb_endpoint') || '');
@@ -84,6 +85,22 @@ export default function App() {
       setError(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Upscale via Gemini
+  const handleUpscale = async () => {
+    if (!resultImage) return;
+    setUpscaling(true);
+    setError(null);
+    try {
+      const enhanced = await upscaleWithGemini(resultImage);
+      setResultImage(enhanced);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur inconnue lors de l\'upscale.';
+      setError(msg);
+    } finally {
+      setUpscaling(false);
     }
   };
 
@@ -224,19 +241,24 @@ export default function App() {
         {/* ── Colonne droite : Preview ── */}
         <div className="card preview-panel">
           <h2>Résultat</h2>
-          {loading ? (
+          {loading || upscaling ? (
             <div className="loading">
               <div className="spinner" />
-              <p>Génération en cours… Cela peut prendre quelques secondes.</p>
+              <p>{upscaling ? 'Amélioration en cours… Cela peut prendre quelques secondes.' : 'Génération en cours… Cela peut prendre quelques secondes.'}</p>
             </div>
           ) : resultImage ? (
             <>
               <div className="preview-image">
                 <img src={resultImage} alt="Boutique générée" />
               </div>
-              <button className="btn-download" onClick={handleDownload}>
-                Télécharger l'image
-              </button>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                <button className="btn-generate" onClick={handleUpscale} disabled={upscaling}>
+                  🔍 Améliorer la qualité (AI Upscale)
+                </button>
+                <button className="btn-download" onClick={handleDownload}>
+                  Télécharger l'image
+                </button>
+              </div>
             </>
           ) : (
             <div className="preview-placeholder">
