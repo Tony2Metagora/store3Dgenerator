@@ -254,19 +254,26 @@ export default function App() {
         {/* ── Colonne droite : Preview ── */}
         <div className="card preview-panel">
           <h2>Résultat</h2>
-          {loading || upscaling ? (
+          {loading ? (
             <div className="loading">
               <div className="spinner" />
-              <p>{upscaling ? 'Amélioration en cours… Cela peut prendre quelques secondes.' : 'Génération en cours… Cela peut prendre quelques secondes.'}</p>
+              <p>Génération en cours… Cela peut prendre quelques secondes.</p>
             </div>
           ) : resultImage ? (
             <>
               <div className="preview-image">
                 <img src={resultImage} alt="Boutique générée" />
               </div>
+              {upscaling && (
+                <div className="loading" style={{ marginTop: '0.75rem' }}>
+                  <div className="spinner" />
+                  <p>Upscale en cours via Real-ESRGAN… Cela peut prendre 30 à 60 secondes.</p>
+                </div>
+              )}
+              {error && <div className="error-msg" style={{ marginTop: '0.75rem' }}>{error}</div>}
               <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
                 <button className="btn-generate" onClick={handleUpscale} disabled={upscaling}>
-                  🔍 Améliorer la qualité (AI Upscale)
+                  {upscaling ? '⏳ Upscale en cours…' : '🔍 Améliorer la qualité (AI Upscale x4)'}
                 </button>
                 <button className="btn-download" onClick={handleDownload}>
                   Télécharger l'image
