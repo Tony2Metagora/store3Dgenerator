@@ -72,7 +72,8 @@ function parseDataUrl(dataUrl: string): { mimeType: string; data: string } {
  * L'authentification se fait via ?key=API_KEY dans l'URL.
  */
 export async function callNanoBanana(
-  sourceImageBase64: string,
+  modelImageBase64: string,
+  brandImageBase64: string,
   prompt: string
 ): Promise<string> {
   const ENDPOINT = getEndpoint();
@@ -85,10 +86,11 @@ export async function callNanoBanana(
     throw new Error('Clé API non configurée. Renseignez-la dans les paramètres API ci-dessus.');
   }
 
-  // Extraire le base64 pur de la dataURL
-  const { mimeType, data } = parseDataUrl(sourceImageBase64);
+  // Extraire le base64 pur des deux images
+  const model = parseDataUrl(modelImageBase64);
+  const brand = parseDataUrl(brandImageBase64);
 
-  // Payload Gemini generateContent
+  // Payload Gemini generateContent — prompt + image modèle + image marque
   const payload = {
     contents: [
       {
@@ -96,8 +98,14 @@ export async function callNanoBanana(
           { text: prompt },
           {
             inlineData: {
-              mimeType,
-              data,
+              mimeType: model.mimeType,
+              data: model.data,
+            },
+          },
+          {
+            inlineData: {
+              mimeType: brand.mimeType,
+              data: brand.data,
             },
           },
         ],

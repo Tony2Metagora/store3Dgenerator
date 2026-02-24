@@ -3,9 +3,13 @@ import { buildBrandPrompt } from './brands';
 import { callNanoBanana, setApiConfig } from './nanoBananaClient';
 import './styles.css';
 
+// Image modèle 3D Metagora — fixe, jamais modifiée par l'utilisateur
+const MODEL_IMAGE_URL = import.meta.env.BASE_URL + 'model-store.jpg';
+
 export default function App() {
-  const [sourceImage, setSourceImage] = useState<string | null>(null);
-  const [sourceName, setSourceName] = useState<string>('');
+  const [modelImageB64, setModelImageB64] = useState<string | null>(null);
+  const [brandImage, setBrandImage] = useState<string | null>(null);
+  const [brandName, setBrandName] = useState<string>('');
   const [marque, setMarque] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [prompt, setPrompt] = useState<string>('');
@@ -16,6 +20,18 @@ export default function App() {
   const [apiEndpoint, setApiEndpoint] = useState<string>(() => localStorage.getItem('nb_endpoint') || '');
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('nb_apikey') || '');
   const [showApiConfig, setShowApiConfig] = useState(false);
+
+  // Charger l'image modèle en base64 au démarrage
+  useEffect(() => {
+    fetch(MODEL_IMAGE_URL)
+      .then((res) => res.blob())
+      .then((blob) => {
+        const reader = new FileReader();
+        reader.onloadend = () => setModelImageB64(reader.result as string);
+        reader.readAsDataURL(blob);
+      })
+      .catch(() => setError('Impossible de charger l\'image modèle Metagora.'));
+  }, []);
 
   // Persist & sync API config
   useEffect(() => {
@@ -29,13 +45,13 @@ export default function App() {
     setPrompt(buildBrandPrompt(marque, description));
   }, [marque, description]);
 
-  // Lecture du fichier uploadé en base64
+  // Lecture du fichier uploadé (photo du magasin de la marque) en base64
   const readFile = (file: File) => {
     if (!file.type.startsWith('image/')) return;
-    setSourceName(file.name);
+    setBrandName(file.name);
     const reader = new FileReader();
     reader.onloadend = () => {
-      setSourceImage(reader.result as string);
+      setBrandImage(reader.result as string);
       setResultImage(null);
       setError(null);
     };
@@ -54,14 +70,14 @@ export default function App() {
     if (file) readFile(file);
   }, []);
 
-  // Appel API
+  // Appel API avec les deux images
   const handleGenerate = async () => {
-    if (!sourceImage) return;
+    if (!modelImageB64 || !brandImage) return;
     setLoading(true);
     setError(null);
     setResultImage(null);
     try {
-      const dataUrl = await callNanoBanana(sourceImage, prompt);
+      const dataUrl = await callNanoBanana(modelImageB64, brandImage, prompt);
       setResultImage(dataUrl);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue lors de la génération.';
@@ -86,7 +102,7 @@ export default function App() {
       {/* Header */}
       <header className="header">
         <h1>Store 3D <span>Generator</span></h1>
-        <p>Metagora × Nano Banana — Transformez votre boutique modèle en univers de marque</p>
+        <p>Metagora × Gemini — Transformez un magasin réel en boutique 3D de marque</p>
       </header>
 
       {/* API Config (collapsible) */}
@@ -96,7 +112,7 @@ export default function App() {
           onClick={() => setShowApiConfig(!showApiConfig)}
           type="button"
         >
-          {showApiConfig ? '▾' : '▸'} Paramètres API Nano Banana
+          {showApiConfig ? '▾' : '▸'} Paramètres API
           {apiKey ? ' ✓' : ''}
         </button>
         {showApiConfig && (
@@ -118,7 +134,7 @@ export default function App() {
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Votre clé API Nano Banana"
+                placeholder="Votre clé API Gemini"
               />
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
@@ -131,9 +147,17 @@ export default function App() {
       <div className="layout">
         {/* ── Colonne gauche : Contrôles ── */}
         <div className="controls">
-          {/* Étape 1 — Upload */}
+          {/* Image modèle Metagora (fixe) */}
           <div className="card">
-            <h2><span className="step-num">1</span> Importer l'image modèle Metagora</h2>
+            <h2>Image modèle 3D Metagora (référence fixe)</h2>
+            <div className="upload-preview">
+              <img src={MODEL_IMAGE_URL} alt="Boutique modèle Metagora" />
+            </div>
+          </div>
+
+          {/* Étape 1 — Upload photo du magasin de la marque */}
+          <div className="card" style={{ marginTop: '1rem' }}>
+            <h2><span className="step-num">1</span> Importer la photo du magasin de la marque</h2>
             <div
               className={`upload-zone ${dragging ? 'dragging' : ''}`}
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -142,11 +166,11 @@ export default function App() {
             >
               <input type="file" accept="image/jpeg,image/png" onChange={handleFileChange} />
               <div className="icon">📷</div>
-              <p>Glissez-déposez ou cliquez pour sélectionner<br />(JPEG / PNG)</p>
+              <p>Glissez-déposez ou cliquez pour sélectionner la photo du magasin réel<br />(JPEG / PNG)</p>
             </div>
-            {sourceImage && (
+            {brandImage && (
               <div className="upload-preview">
-                <img src={sourceImage} alt={sourceName} />
+                <img src={brandImage} alt={brandName} />
               </div>
             )}
           </div>
@@ -185,13 +209,13 @@ export default function App() {
 
           {/* Étape 3 — Générer */}
           <div className="card" style={{ marginTop: '1rem' }}>
-            <h2><span className="step-num">3</span> Lancer Nano Banana</h2>
+            <h2><span className="step-num">3</span> Générer</h2>
             <button
               className="btn-generate"
-              disabled={!sourceImage || loading}
+              disabled={!brandImage || !modelImageB64 || loading}
               onClick={handleGenerate}
             >
-              {loading ? 'Génération en cours…' : 'Générer l\'image avec Nano Banana'}
+              {loading ? 'Génération en cours…' : 'Générer l\'image'}
             </button>
             {error && <div className="error-msg">{error}</div>}
           </div>
@@ -223,7 +247,7 @@ export default function App() {
       </div>
 
       <footer className="footer">
-        Store 3D Generator — Metagora × Nano Banana
+        Store 3D Generator — Metagora × Gemini
       </footer>
     </div>
   );
