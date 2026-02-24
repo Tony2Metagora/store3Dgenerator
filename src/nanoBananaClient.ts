@@ -30,23 +30,31 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 /**
  * Post-traitement côté front :
- *  1. Redimensionne l'image pour que la hauteur = 2056 px (ratio conservé)
+ *  1. Redimensionne l'image UNIQUEMENT si elle dépasse TARGET_HEIGHT (downscale only)
  *  2. Compresse en JPEG pour rester sous 5 Mo
+ *  Ne fait JAMAIS d'upscale pour éviter le flou.
  */
 async function resizeAndCompress(dataUrl: string): Promise<string> {
   const img = await loadImage(dataUrl);
 
-  const ratio = TARGET_HEIGHT / img.height;
-  const targetWidth = Math.round(img.width * ratio);
+  let targetWidth = img.width;
+  let targetHeight = img.height;
+
+  // Downscale seulement si l'image est plus grande que TARGET_HEIGHT
+  if (img.height > TARGET_HEIGHT) {
+    const ratio = TARGET_HEIGHT / img.height;
+    targetWidth = Math.round(img.width * ratio);
+    targetHeight = TARGET_HEIGHT;
+  }
 
   const canvas = document.createElement('canvas');
   canvas.width = targetWidth;
-  canvas.height = TARGET_HEIGHT;
+  canvas.height = targetHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas context indisponible');
-  ctx.drawImage(img, 0, 0, targetWidth, TARGET_HEIGHT);
+  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-  let quality = 0.92;
+  let quality = 0.95;
   let result = canvas.toDataURL('image/jpeg', quality);
 
   while (result.length * 0.75 > MAX_BYTES && quality > 0.3) {

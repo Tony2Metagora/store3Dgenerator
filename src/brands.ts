@@ -16,6 +16,7 @@ Générer une nouvelle image où la boutique ${m} adopte la structure et le desi
 Conserver et adapter les codes visuels visibles sur la photo réelle de ${m} : palette de couleurs, style de mobilier, traitement des murs, type de lumière, style de signalétique, logos et typographies, de façon cohérente et lisible, avec au moins un logo ${m} bien visible sur un mur ou un panneau au fond de la boutique.
 Remplacer ou réorganiser les produits de la boutique modèle pour mettre clairement en avant ${d} caractéristiques de ${m} : rayons et présentoirs adaptés, produits bien mis en valeur, packaging et supports de communication cohérents avec la photo réelle.
 Le résultat doit être un espace où l'on reconnaît immédiatement la structure de la boutique 3D Metagora tout en identifiant clairement l'univers et l'identité de ${m} tels qu'ils apparaissent sur l'image réelle fournie.
+L'image générée doit être à la résolution la plus haute possible, idéalement 4K (3840×2160) ou au minimum Full HD (1920×1080).
 Style photographie ultra réaliste, haute définition, objectif 24–35 mm, couleurs naturelles, lumière douce et homogène, détails nets sur les matériaux et les produits.
 Negative prompt : architecture complètement différente de la boutique 3D Metagora, codes visuels sans lien avec la photo réelle de ${m}, logo ${m} absent ou illisible, ambiance de centre commercial générique, texte illisible, flou, low‑res, style cartoon ou peinture, watermark, visages humains visibles.`;
 }
