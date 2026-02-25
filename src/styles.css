@@ -322,6 +322,150 @@ body {
   color: var(--accent);
 }
 
+/* Result panel sections */
+.result-section {
+  width: 100%;
+}
+
+.result-section-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  color: var(--text);
+}
+
+.edit-prompt-input {
+  flex: 1;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 48px;
+  background: #fafafa;
+  color: var(--text);
+  transition: border-color 0.2s;
+}
+
+.edit-prompt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Action buttons row */
+.result-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.btn-action {
+  flex: 1;
+  min-width: 120px;
+  padding: 0.6rem 0.8rem;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s, transform 0.1s;
+  text-align: center;
+}
+
+.btn-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-edit {
+  flex: 0 0 auto;
+  min-width: 100px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-edit:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-upscale {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+
+.btn-upscale:hover:not(:disabled) {
+  background: #6366f1;
+  color: #fff;
+}
+
+.btn-download-action {
+  border-color: #059669;
+  color: #059669;
+}
+
+.btn-download-action:hover:not(:disabled) {
+  background: #059669;
+  color: #fff;
+}
+
+.btn-alt-upload {
+  border-color: #d97706;
+  color: #d97706;
+}
+
+.btn-alt-upload:hover:not(:disabled) {
+  background: #d97706;
+  color: #fff;
+}
+
+/* Info message */
+.info-msg {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+/* Inline button within info messages */
+.btn-inline {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid #6366f1;
+  border-radius: 6px;
+  background: #fff;
+  color: #6366f1;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.btn-inline:hover:not(:disabled) {
+  background: #6366f1;
+  color: #fff;
+}
+
+.btn-inline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Footer */
 .footer {
   text-align: center;

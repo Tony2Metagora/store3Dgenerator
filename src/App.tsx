@@ -1,6 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { buildBrandPrompt } from './brands';
-import { callNanoBanana, setApiConfig, setUpscaleUrl, upscaleImage } from './nanoBananaClient';
+import {
+  callNanoBanana,
+  setApiConfig,
+  setEditEndpoint,
+  setUpscaleUrl,
+  upscaleImage,
+  editImageWithGemini,
+  resizeToTargetHeight,
+  getImageHeight,
+} from './nanoBananaClient';
 import './styles.css';
 
 // Image modèle 3D Metagora — fixe, jamais modifiée par l'utilisateur
@@ -16,12 +25,19 @@ export default function App() {
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [upscaling, setUpscaling] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resultError, setResultError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [apiEndpoint, setApiEndpoint] = useState<string>(() => localStorage.getItem('nb_endpoint') || '');
+  const [editEndpointState, setEditEndpointState] = useState<string>(() => localStorage.getItem('nb_edit_endpoint') || '');
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('nb_apikey') || '');
   const [upscaleUrl, setUpscaleUrlState] = useState<string>(() => localStorage.getItem('nb_upscale_url') || '');
   const [showApiConfig, setShowApiConfig] = useState(false);
+  const [editPrompt, setEditPrompt] = useState<string>('');
+  const [altImageHeight, setAltImageHeight] = useState<number | null>(null);
+  const [resizing, setResizing] = useState(false);
+  const altFileInputRef = useRef<HTMLInputElement>(null);
 
   // Charger l'image modèle en base64 au démarrage
   useEffect(() => {
@@ -39,10 +55,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('nb_endpoint', apiEndpoint);
     localStorage.setItem('nb_apikey', apiKey);
+    localStorage.setItem('nb_edit_endpoint', editEndpointState);
     localStorage.setItem('nb_upscale_url', upscaleUrl);
     setApiConfig(apiEndpoint, apiKey);
+    setEditEndpoint(editEndpointState);
     setUpscaleUrl(upscaleUrl);
-  }, [apiEndpoint, apiKey, upscaleUrl]);
+  }, [apiEndpoint, apiKey, editEndpointState, upscaleUrl]);
 
   // Met à jour le prompt dès que la marque ou la description change
   useEffect(() => {
@@ -58,6 +76,7 @@ export default function App() {
       setBrandImage(reader.result as string);
       setResultImage(null);
       setError(null);
+      setResultError(null);
     };
     reader.readAsDataURL(file);
   };
@@ -74,12 +93,14 @@ export default function App() {
     if (file) readFile(file);
   }, []);
 
-  // Appel API avec les deux images
+  // Appel API avec les deux images (génération)
   const handleGenerate = async () => {
     if (!modelImageB64 || !brandImage) return;
     setLoading(true);
     setError(null);
+    setResultError(null);
     setResultImage(null);
+    setAltImageHeight(null);
     try {
       const dataUrl = await callNanoBanana(modelImageB64, brandImage, prompt);
       setResultImage(dataUrl);
@@ -91,19 +112,73 @@ export default function App() {
     }
   };
 
+  // Modification de l'image via prompt libre (API 2)
+  const handleEdit = async () => {
+    if (!resultImage || !editPrompt.trim()) return;
+    setEditing(true);
+    setResultError(null);
+    try {
+      const modified = await editImageWithGemini(resultImage, editPrompt.trim());
+      setResultImage(modified);
+      setAltImageHeight(null);
+      setEditPrompt('');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur inconnue lors de la modification.';
+      setResultError(msg);
+    } finally {
+      setEditing(false);
+    }
+  };
+
   // Upscale via Cloudflare Worker + Replicate Real-ESRGAN
   const handleUpscale = async () => {
     if (!resultImage) return;
     setUpscaling(true);
-    setError(null);
+    setResultError(null);
     try {
       const enhanced = await upscaleImage(resultImage);
       setResultImage(enhanced);
+      setAltImageHeight(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue lors de l\'upscale.';
-      setError(msg);
+      setResultError(msg);
     } finally {
       setUpscaling(false);
+    }
+  };
+
+  // Upload d'une image alternative
+  const handleAltUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const dataUrl = reader.result as string;
+      setResultImage(dataUrl);
+      setResultError(null);
+      const h = await getImageHeight(dataUrl);
+      setAltImageHeight(h);
+    };
+    reader.readAsDataURL(file);
+    // Reset input so same file can be re-uploaded
+    e.target.value = '';
+  };
+
+  // Redimensionner l'image alternative à 2056px
+  const handleResizeAlt = async () => {
+    if (!resultImage) return;
+    setResizing(true);
+    setResultError(null);
+    try {
+      const resized = await resizeToTargetHeight(resultImage);
+      setResultImage(resized);
+      const h = await getImageHeight(resized);
+      setAltImageHeight(h);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur lors du redimensionnement.';
+      setResultError(msg);
+    } finally {
+      setResizing(false);
     }
   };
 
@@ -116,6 +191,8 @@ export default function App() {
     a.download = `store3d_${marque.replace(/\s+/g, '_')}_${Date.now()}.${ext}`;
     a.click();
   };
+
+  const isBusy = upscaling || editing || resizing;
 
   return (
     <div className="app">
@@ -138,7 +215,7 @@ export default function App() {
         {showApiConfig && (
           <div style={{ marginTop: '0.75rem' }}>
             <div className="field">
-              <label htmlFor="apiEndpoint">Endpoint API</label>
+              <label htmlFor="apiEndpoint">Endpoint API (Génération)</label>
               <input
                 id="apiEndpoint"
                 type="url"
@@ -148,7 +225,17 @@ export default function App() {
               />
             </div>
             <div className="field">
-              <label htmlFor="apiKey">Clé API</label>
+              <label htmlFor="editEndpoint">Endpoint API (Modification)</label>
+              <input
+                id="editEndpoint"
+                type="url"
+                value={editEndpointState}
+                onChange={(e) => setEditEndpointState(e.target.value)}
+                placeholder="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="apiKey">Clé API (partagée génération + modification)</label>
               <input
                 id="apiKey"
                 type="password"
@@ -251,7 +338,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── Colonne droite : Preview ── */}
+        {/* ── Colonne droite : Preview + Actions ── */}
         <div className="card preview-panel">
           <h2>Résultat</h2>
           {loading ? (
@@ -264,20 +351,85 @@ export default function App() {
               <div className="preview-image">
                 <img src={resultImage} alt="Boutique générée" />
               </div>
-              {upscaling && (
-                <div className="loading" style={{ marginTop: '0.75rem' }}>
-                  <div className="spinner" />
-                  <p>Upscale en cours via Real-ESRGAN… Cela peut prendre 30 à 60 secondes.</p>
+
+              {/* Info hauteur si image alternative uploadée */}
+              {altImageHeight !== null && (
+                <div className="info-msg" style={{ marginTop: '0.75rem' }}>
+                  Hauteur actuelle : <strong>{altImageHeight}px</strong>
+                  {altImageHeight !== 2056 && (
+                    <>
+                      {' '} (attendu : 2056px)
+                      <button
+                        className="btn-inline"
+                        onClick={handleResizeAlt}
+                        disabled={resizing}
+                      >
+                        {resizing ? '⏳ Redimensionnement…' : '↕ Redimensionner à 2056px'}
+                      </button>
+                    </>
+                  )}
+                  {altImageHeight === 2056 && <> ✓ Format correct</>}
                 </div>
               )}
-              {error && <div className="error-msg" style={{ marginTop: '0.75rem' }}>{error}</div>}
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-                <button className="btn-generate" onClick={handleUpscale} disabled={upscaling}>
-                  {upscaling ? '⏳ Upscale en cours…' : '🔍 Améliorer la qualité (AI Upscale x4)'}
+
+              {/* Spinner pour actions en cours */}
+              {(upscaling || editing) && (
+                <div className="loading" style={{ marginTop: '0.75rem', padding: '1rem' }}>
+                  <div className="spinner" />
+                  <p>
+                    {upscaling && 'Upscale en cours via Real-ESRGAN… Cela peut prendre 30 à 60 secondes.'}
+                    {editing && 'Modification en cours via Gemini…'}
+                  </p>
+                </div>
+              )}
+
+              {/* Erreurs du panneau résultat */}
+              {resultError && <div className="error-msg" style={{ marginTop: '0.75rem' }}>{resultError}</div>}
+
+              {/* ── Section : Modifier l'image avec un prompt ── */}
+              <div className="result-section" style={{ marginTop: '1rem' }}>
+                <label className="result-section-label">Modifier l'image (prompt libre)</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <textarea
+                    className="edit-prompt-input"
+                    value={editPrompt}
+                    onChange={(e) => setEditPrompt(e.target.value)}
+                    placeholder="Ex. : change la couleur du sol en blanc, ajoute un logo au centre…"
+                    rows={2}
+                  />
+                  <button
+                    className="btn-action btn-edit"
+                    onClick={handleEdit}
+                    disabled={isBusy || !editPrompt.trim()}
+                    title="Appliquer la modification"
+                  >
+                    {editing ? '⏳' : '✏️'} Modifier
+                  </button>
+                </div>
+              </div>
+
+              {/* ── Boutons d'action ── */}
+              <div className="result-actions" style={{ marginTop: '1rem' }}>
+                <button className="btn-action btn-upscale" onClick={handleUpscale} disabled={isBusy}>
+                  {upscaling ? '⏳ Upscale…' : '🔍 Upscale x4'}
                 </button>
-                <button className="btn-download" onClick={handleDownload}>
-                  Télécharger l'image
+                <button className="btn-action btn-download-action" onClick={handleDownload} disabled={isBusy}>
+                  💾 Télécharger
                 </button>
+                <button
+                  className="btn-action btn-alt-upload"
+                  onClick={() => altFileInputRef.current?.click()}
+                  disabled={isBusy}
+                >
+                  📤 Remplacer par une image
+                </button>
+                <input
+                  ref={altFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  style={{ display: 'none' }}
+                  onChange={handleAltUpload}
+                />
               </div>
             </>
           ) : (

@@ -1,10 +1,15 @@
 let runtimeEndpoint = '';
 let runtimeApiKey = '';
+let runtimeEditEndpoint = '';
 let runtimeUpscaleUrl = '';
 
 export function setApiConfig(endpoint: string, apiKey: string) {
   runtimeEndpoint = endpoint;
   runtimeApiKey = apiKey;
+}
+
+export function setEditEndpoint(url: string) {
+  runtimeEditEndpoint = url;
 }
 
 export function setUpscaleUrl(url: string) {
@@ -18,12 +23,15 @@ function getUpscaleUrl() {
 function getEndpoint() {
   return runtimeEndpoint || import.meta.env.VITE_NANOBANANA_ENDPOINT || '';
 }
+function getEditEndpoint() {
+  return runtimeEditEndpoint || '';
+}
 function getApiKey() {
   return runtimeApiKey || import.meta.env.VITE_NANOBANANA_API_KEY || '';
 }
 
 const TARGET_HEIGHT = 2056;
-const MAX_BYTES = 5 * 1024 * 1024; // 5 Mo
+const MAX_BYTES = 3 * 1024 * 1024; // 3 Mo
 
 /**
  * Charge une dataURL dans un HTMLImageElement.
@@ -72,6 +80,41 @@ async function resizeAndCompress(dataUrl: string): Promise<string> {
   }
 
   return result;
+}
+
+/**
+ * Redimensionne une image à exactement TARGET_HEIGHT px de hauteur (en gardant le ratio).
+ * Utilisé pour normaliser les images uploadées manuellement.
+ */
+export async function resizeToTargetHeight(dataUrl: string): Promise<string> {
+  const img = await loadImage(dataUrl);
+  const ratio = TARGET_HEIGHT / img.height;
+  const targetWidth = Math.round(img.width * ratio);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = TARGET_HEIGHT;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas context indisponible');
+  ctx.drawImage(img, 0, 0, targetWidth, TARGET_HEIGHT);
+
+  let quality = 0.99;
+  let result = canvas.toDataURL('image/jpeg', quality);
+
+  while (result.length * 0.75 > MAX_BYTES && quality > 0.3) {
+    quality -= 0.05;
+    result = canvas.toDataURL('image/jpeg', quality);
+  }
+
+  return result;
+}
+
+/**
+ * Retourne la hauteur d'une image à partir de sa dataURL.
+ */
+export async function getImageHeight(dataUrl: string): Promise<number> {
+  const img = await loadImage(dataUrl);
+  return img.height;
 }
 
 /**
@@ -169,6 +212,78 @@ export async function callNanoBanana(
   }
 
   throw new Error('Aucune image trouvée dans la réponse de l\'API. Vérifiez que le modèle supporte la génération d\'images.');
+}
+
+/**
+ * Modifie une image existante via l'API Gemini (endpoint dédié modification).
+ * Envoie l'image + un prompt texte libre → retourne l'image modifiée.
+ */
+export async function editImageWithGemini(
+  imageDataUrl: string,
+  editPrompt: string
+): Promise<string> {
+  const EDIT_ENDPOINT = getEditEndpoint();
+  const API_KEY = getApiKey();
+
+  if (!EDIT_ENDPOINT) {
+    throw new Error('Endpoint de modification non configuré. Renseignez-le dans les paramètres API.');
+  }
+  if (!API_KEY) {
+    throw new Error('Clé API non configurée. Renseignez-la dans les paramètres API.');
+  }
+
+  const img = parseDataUrl(imageDataUrl);
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          { text: editPrompt },
+          {
+            inlineData: {
+              mimeType: img.mimeType,
+              data: img.data,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ['IMAGE', 'TEXT'],
+    },
+  };
+
+  const separator = EDIT_ENDPOINT.includes('?') ? '&' : '?';
+  const url = `${EDIT_ENDPOINT}${separator}key=${API_KEY}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Erreur API modification (${response.status}) : ${text || response.statusText}`);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const json: any = await response.json();
+
+  const candidates = json.candidates ?? [];
+  for (const candidate of candidates) {
+    const parts = candidate.content?.parts ?? [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        const imgMime = part.inlineData.mimeType || 'image/jpeg';
+        let dataUrl = `data:${imgMime};base64,${part.inlineData.data}`;
+        dataUrl = await resizeAndCompress(dataUrl);
+        return dataUrl;
+      }
+    }
+  }
+
+  throw new Error('Aucune image trouvée dans la réponse de modification.');
 }
 
 /**
