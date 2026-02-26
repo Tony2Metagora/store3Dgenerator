@@ -30,9 +30,9 @@ export default function App() {
   const [resultError, setResultError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [apiEndpoint, setApiEndpoint] = useState<string>(() => localStorage.getItem('nb_endpoint') || '');
-  const [editEndpointState, setEditEndpointState] = useState<string>(() => localStorage.getItem('nb_edit_endpoint') || '');
+  const [editEndpointState, setEditEndpointState] = useState<string>(() => localStorage.getItem('nb_edit_endpoint') || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent');
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('nb_apikey') || '');
-  const [upscaleUrl, setUpscaleUrlState] = useState<string>(() => localStorage.getItem('nb_upscale_url') || '');
+  const [upscaleUrl, setUpscaleUrlState] = useState<string>(() => localStorage.getItem('nb_upscale_url') || 'https://upscale-worker.metagoraup.workers.dev');
   const [showApiConfig, setShowApiConfig] = useState(false);
   const [editPrompt, setEditPrompt] = useState<string>('');
   const [altImageHeight, setAltImageHeight] = useState<number | null>(null);
