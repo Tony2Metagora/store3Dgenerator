@@ -74,8 +74,8 @@ async function resizeAndCompress(dataUrl: string): Promise<string> {
   let quality = 0.99;
   let result = canvas.toDataURL('image/jpeg', quality);
 
-  while (result.length * 0.75 > MAX_BYTES && quality > 0.3) {
-    quality -= 0.05;
+  while (result.length * 0.75 > MAX_BYTES && quality > 0.5) {
+    quality -= 0.02;
     result = canvas.toDataURL('image/jpeg', quality);
   }
 
@@ -101,8 +101,8 @@ export async function resizeToTargetHeight(dataUrl: string): Promise<string> {
   let quality = 0.99;
   let result = canvas.toDataURL('image/jpeg', quality);
 
-  while (result.length * 0.75 > MAX_BYTES && quality > 0.3) {
-    quality -= 0.05;
+  while (result.length * 0.75 > MAX_BYTES && quality > 0.5) {
+    quality -= 0.02;
     result = canvas.toDataURL('image/jpeg', quality);
   }
 
