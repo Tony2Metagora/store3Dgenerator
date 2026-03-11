@@ -47,9 +47,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 /**
  * Post-traitement côté front :
- *  1. Redimensionne l'image UNIQUEMENT si elle dépasse TARGET_HEIGHT (downscale only)
- *  2. Compresse en JPEG pour rester sous 5 Mo
- *  Ne fait JAMAIS d'upscale pour éviter le flou.
+ *  1. Redimensionne l'image pour obtenir exactement TARGET_HEIGHT px de hauteur
+ *  2. Compresse en JPEG pour rester sous 3 Mo
  */
 async function resizeAndCompress(dataUrl: string): Promise<string> {
   const img = await loadImage(dataUrl);
@@ -57,8 +56,8 @@ async function resizeAndCompress(dataUrl: string): Promise<string> {
   let targetWidth = img.width;
   let targetHeight = img.height;
 
-  // Downscale seulement si l'image est plus grande que TARGET_HEIGHT
-  if (img.height > TARGET_HEIGHT) {
+  // Forcer exactement TARGET_HEIGHT (up ou down)
+  if (img.height !== TARGET_HEIGHT) {
     const ratio = TARGET_HEIGHT / img.height;
     targetWidth = Math.round(img.width * ratio);
     targetHeight = TARGET_HEIGHT;
