@@ -10,6 +10,7 @@ import {
   setUpscaleUrl,
   upscaleImage,
   editImageWithGemini,
+  refineImageQuality,
   resizeToTargetHeight,
   getImageSize,
   TARGET_WIDTH,
@@ -42,6 +43,7 @@ export default function App() {
   // Post-actions
   const [upscaling, setUpscaling] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [refining, setRefining] = useState(false);
   const [resizing, setResizing] = useState(false);
   const [editPrompt, setEditPrompt] = useState<string>('');
   const [altSize, setAltSize] = useState<{ width: number; height: number } | null>(null);
@@ -222,6 +224,21 @@ export default function App() {
     }
   };
 
+  const handleRefine = async () => {
+    if (!activeImage || selectedVariant === null) return;
+    setRefining(true);
+    setResultError(null);
+    try {
+      const refined = await refineImageQuality(activeImage);
+      setVariants((prev) => prev.map((v, i) => (i === selectedVariant ? refined : v)));
+      setAltSize(null);
+    } catch (err: unknown) {
+      setResultError(err instanceof Error ? err.message : 'Erreur lors du raffinement.');
+    } finally {
+      setRefining(false);
+    }
+  };
+
   const handleAltUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith('image/') || selectedVariant === null) return;
@@ -260,7 +277,7 @@ export default function App() {
     a.click();
   };
 
-  const isBusy = upscaling || editing || resizing;
+  const isBusy = upscaling || editing || refining || resizing;
   const missingMoules = MOULES.filter((m) => !moulesData[m.id]);
   const canGenerate = !!selectedMouleData && !!brandImage && !!apiKey && !loading;
 
@@ -520,12 +537,13 @@ export default function App() {
                     </div>
                   )}
 
-                  {(upscaling || editing) && (
+                  {(upscaling || editing || refining) && (
                     <div className="loading" style={{ marginTop: '0.75rem', padding: '1rem' }}>
                       <div className="spinner" />
                       <p>
                         {upscaling && 'Upscale x4 via Real-ESRGAN… 30-60 s.'}
                         {editing && 'Modification en cours…'}
+                        {refining && 'Raffinement qualité via Gemini… 10-20 s.'}
                       </p>
                     </div>
                   )}
@@ -553,6 +571,9 @@ export default function App() {
                   </div>
 
                   <div className="result-actions" style={{ marginTop: '1rem' }}>
+                    <button className="btn-action btn-refine" onClick={handleRefine} disabled={isBusy}>
+                      {refining ? '⏳ Raffinement…' : '✨ Améliorer qualité'}
+                    </button>
                     <button className="btn-action btn-upscale" onClick={handleUpscale} disabled={isBusy}>
                       {upscaling ? '⏳ Upscale…' : '🔍 Upscale x4'}
                     </button>
