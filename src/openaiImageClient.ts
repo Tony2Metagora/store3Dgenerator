@@ -27,20 +27,29 @@ export function setAzureConfig(endpoint: string, apiKey: string) {
 function getEndpoint() { return runtimeAzureEndpoint || ''; }
 function getApiKey() { return runtimeAzureApiKey || ''; }
 
-const FETCH_TIMEOUT_MS = 120_000; // 2 min — gpt-image-2 quality=high prend 30-90s typique
+const FETCH_TIMEOUT_MS = 300_000; // 5 min — gpt-image-2 quality=high peut prendre 90-180s,
+// et 3 en parallèle peuvent se queue derrière le rate-limit (10 req/min sur Azure standard).
 
 /**
  * Wrap fetch avec un AbortController qui kill la requête après FETCH_TIMEOUT_MS.
  * Évite le "load infini" si CORS bloque ou si le réseau pend.
  * Convertit aussi les erreurs CORS/network en message lisible.
+ * Logge la durée totale en console pour diagnostic.
  */
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const startedAt = performance.now();
+  const opLabel = url.match(/\/images\/(\w+)/)?.[1] || 'fetch';
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const elapsed = Math.round(performance.now() - startedAt);
+    console.log(`[Azure ${opLabel}] ${res.status} en ${elapsed}ms`);
+    return res;
   } catch (err) {
+    const elapsed = Math.round(performance.now() - startedAt);
     if (err instanceof DOMException && err.name === 'AbortError') {
+      console.warn(`[Azure ${opLabel}] timeout après ${elapsed}ms`);
       throw new Error(`Timeout après ${FETCH_TIMEOUT_MS / 1000}s — l'API Azure n'a pas répondu.`);
     }
     if (err instanceof TypeError && /fetch/i.test(err.message)) {
