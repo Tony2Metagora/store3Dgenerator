@@ -86,6 +86,18 @@ function normalizeAzureUrl(rawUrl: string, operation: 'edits' | 'generations'): 
   return query ? `${cleanBase}/images/${operation}?${query}` : `${cleanBase}/images/${operation}`;
 }
 
+/** Force une api-version donnée sur une URL Azure. Crée le param s'il manque. */
+function swapApiVersion(url: string, version: string): string {
+  if (/api-version=/i.test(url)) {
+    return url.replace(/api-version=[^&]+/i, `api-version=${version}`);
+  }
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}api-version=${version}`;
+}
+
+/** Api-version preview connue pour supporter /images/edits sur gpt-image-1/2. */
+const FALLBACK_API_VERSION = '2025-04-01-preview';
+
 interface AzureImageResponse {
   data?: Array<{ b64_json?: string; url?: string }>;
   error?: { message?: string; code?: string };
@@ -99,14 +111,14 @@ function ensureCreds(): { rawEndpoint: string; apiKey: string } {
   return { rawEndpoint, apiKey };
 }
 
-async function parseImageResponse(response: Response): Promise<string> {
+async function parseImageResponse(response: Response, urlForErr: string): Promise<string> {
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new Error(`Erreur Azure OpenAI (${response.status}) : ${text || response.statusText}`);
+    throw new Error(`Erreur Azure OpenAI (${response.status}) : ${text || response.statusText} — URL appelée : ${urlForErr}`);
   }
   const json = await response.json() as AzureImageResponse;
   if (json.error) {
-    throw new Error(`Erreur Azure OpenAI : ${json.error.message || json.error.code || 'inconnue'}`);
+    throw new Error(`Erreur Azure OpenAI : ${json.error.message || json.error.code || 'inconnue'} — URL appelée : ${urlForErr}`);
   }
   const item = json.data?.[0];
   if (!item?.b64_json) {
@@ -121,25 +133,47 @@ async function parseImageResponse(response: Response): Promise<string> {
  */
 async function callImagesEdits(images: string[], prompt: string): Promise<string> {
   const { rawEndpoint, apiKey } = ensureCreds();
-  const endpoint = normalizeAzureUrl(rawEndpoint, 'edits');
+  const primaryUrl = normalizeAzureUrl(rawEndpoint, 'edits');
 
-  const fd = new FormData();
-  fd.append('prompt', prompt);
-  fd.append('n', '1');
-  fd.append('size', '1536x1024');
-  fd.append('quality', 'high');
-  images.forEach((dataUrl, idx) => {
-    const { blob, ext } = dataUrlToBlob(dataUrl);
-    fd.append('image', blob, `input-${idx}.${ext}`);
-  });
+  // FormData factory : doit être recréée pour chaque tentative (le body est consommé par fetch).
+  const buildFormData = () => {
+    const fd = new FormData();
+    fd.append('prompt', prompt);
+    fd.append('n', '1');
+    fd.append('size', '1536x1024');
+    fd.append('quality', 'high');
+    images.forEach((dataUrl, idx) => {
+      const { blob, ext } = dataUrlToBlob(dataUrl);
+      fd.append('image', blob, `input-${idx}.${ext}`);
+    });
+    return fd;
+  };
 
-  const response = await fetchWithTimeout(endpoint, {
+  let response = await fetchWithTimeout(primaryUrl, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}` },
-    body: fd,
+    body: buildFormData(),
   });
 
-  const rawDataUrl = await parseImageResponse(response);
+  let urlUsed = primaryUrl;
+
+  // Retry avec api-version preview si 404 — gpt-image-2 ne supporte pas
+  // toujours /edits avec l'api-version 2024-02-01 que le portail propose par défaut.
+  if (response.status === 404 && !primaryUrl.includes(FALLBACK_API_VERSION)) {
+    const fallbackUrl = swapApiVersion(primaryUrl, FALLBACK_API_VERSION);
+    console.warn(
+      `[Azure /edits] 404 avec api-version utilisateur, retry avec ${FALLBACK_API_VERSION}`,
+      { primaryUrl, fallbackUrl }
+    );
+    response = await fetchWithTimeout(fallbackUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body: buildFormData(),
+    });
+    urlUsed = fallbackUrl;
+  }
+
+  const rawDataUrl = await parseImageResponse(response, urlUsed);
   return fit16x9AndCompress(rawDataUrl);
 }
 
@@ -148,24 +182,35 @@ async function callImagesEdits(images: string[], prompt: string): Promise<string
  */
 async function callImagesGenerations(prompt: string): Promise<string> {
   const { rawEndpoint, apiKey } = ensureCreds();
-  const endpoint = normalizeAzureUrl(rawEndpoint, 'generations');
+  const primaryUrl = normalizeAzureUrl(rawEndpoint, 'generations');
 
-  const response = await fetchWithTimeout(endpoint, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      prompt,
-      n: 1,
-      size: '1536x1024',
-      quality: 'high',
-      output_format: 'png',
-    }),
+  const body = JSON.stringify({
+    prompt,
+    n: 1,
+    size: '1536x1024',
+    quality: 'high',
+    output_format: 'png',
   });
+  const headers = {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+  };
 
-  const rawDataUrl = await parseImageResponse(response);
+  let response = await fetchWithTimeout(primaryUrl, { method: 'POST', headers, body });
+  let urlUsed = primaryUrl;
+
+  // Même retry preview pour /generations au cas où.
+  if (response.status === 404 && !primaryUrl.includes(FALLBACK_API_VERSION)) {
+    const fallbackUrl = swapApiVersion(primaryUrl, FALLBACK_API_VERSION);
+    console.warn(
+      `[Azure /generations] 404 avec api-version utilisateur, retry avec ${FALLBACK_API_VERSION}`,
+      { primaryUrl, fallbackUrl }
+    );
+    response = await fetchWithTimeout(fallbackUrl, { method: 'POST', headers, body });
+    urlUsed = fallbackUrl;
+  }
+
+  const rawDataUrl = await parseImageResponse(response, urlUsed);
   return fit16x9AndCompress(rawDataUrl);
 }
 
