@@ -557,8 +557,6 @@ body {
 .btn-edit:hover:not(:disabled) { background: var(--accent); color: #fff; }
 .btn-refine { border-color: #8b5cf6; color: #8b5cf6; }
 .btn-refine:hover:not(:disabled) { background: #8b5cf6; color: #fff; }
-.btn-upscale { border-color: #6366f1; color: #6366f1; }
-.btn-upscale:hover:not(:disabled) { background: #6366f1; color: #fff; }
 .btn-download-action { border-color: #059669; color: #059669; }
 .btn-download-action:hover:not(:disabled) { background: #059669; color: #fff; }
 .btn-alt-upload { border-color: #d97706; color: #d97706; }

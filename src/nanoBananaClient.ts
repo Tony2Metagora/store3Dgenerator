@@ -1,7 +1,6 @@
 let runtimeEndpoint = '';
 let runtimeApiKey = '';
 let runtimeEditEndpoint = '';
-let runtimeUpscaleUrl = '';
 
 export function setApiConfig(endpoint: string, apiKey: string) {
   runtimeEndpoint = endpoint;
@@ -10,14 +9,6 @@ export function setApiConfig(endpoint: string, apiKey: string) {
 
 export function setEditEndpoint(url: string) {
   runtimeEditEndpoint = url;
-}
-
-export function setUpscaleUrl(url: string) {
-  runtimeUpscaleUrl = url;
-}
-
-function getUpscaleUrl() {
-  return runtimeUpscaleUrl || '';
 }
 
 function getEndpoint() {
@@ -49,7 +40,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
  * Si l'image générée n'est pas 16:9, on scale-to-fill puis on center-crop.
  * Sortie JPEG compressée < 3 Mo.
  */
-async function fit16x9AndCompress(dataUrl: string): Promise<string> {
+export async function fit16x9AndCompress(dataUrl: string): Promise<string> {
   const img = await loadImage(dataUrl);
 
   const srcRatio = img.width / img.height;
@@ -251,11 +242,11 @@ export async function editImageWithGemini(
 }
 
 /**
- * Raffinement qualité : renvoie la même image à Gemini avec un prompt
- * de "re-rendu net" pour récupérer des détails plus précis qu'un simple
- * upscale bicubique. Préserve la composition.
+ * Raffinement qualité : renvoie la même image au modèle avec un prompt
+ * de "re-rendu net" pour récupérer des détails plus précis. Préserve
+ * la composition exacte (camera angle, products, lighting).
  */
-const REFINE_PROMPT = `Re-render this exact image at maximum photographic quality.
+export const REFINE_PROMPT = `Re-render this exact image at maximum photographic quality.
 
 STRICTLY PRESERVE: exact composition, exact camera angle, exact perspective, exact architecture, exact furniture placement, exact products and their positions, exact colors, exact logo placement, exact lighting direction.
 
@@ -277,51 +268,3 @@ export async function refineImageQuality(imageDataUrl: string): Promise<string> 
   return fit16x9AndCompress(raw);
 }
 
-/**
- * Upscale via Cloudflare Worker → Replicate Real-ESRGAN x4.
- * Conservé tel quel ; l'utilisateur peut l'appeler à la demande
- * après avoir sélectionné la variante qu'il préfère.
- */
-export async function upscaleImage(imageDataUrl: string): Promise<string> {
-  const UPSCALE_URL = getUpscaleUrl();
-  if (!UPSCALE_URL) {
-    throw new Error('URL du service d\'upscale non configurée.');
-  }
-
-  const createRes = await fetch(UPSCALE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: imageDataUrl, scale: 4 }),
-  });
-  if (!createRes.ok) {
-    const text = await createRes.text().catch(() => '');
-    throw new Error(`Erreur upscale création (${createRes.status}) : ${text || createRes.statusText}`);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const createJson: any = await createRes.json();
-  if (createJson.error) throw new Error(`Erreur upscale : ${createJson.error}`);
-  const predictionId = createJson.id;
-  if (!predictionId) throw new Error('Aucun ID de prediction retourné par le service d\'upscale.');
-
-  const baseUrl = UPSCALE_URL.replace(/\/+$/, '');
-  const maxAttempts = 60;
-  for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const pollRes = await fetch(`${baseUrl}/status?id=${predictionId}`);
-    if (!pollRes.ok) {
-      const text = await pollRes.text().catch(() => '');
-      throw new Error(`Erreur polling upscale (${pollRes.status}) : ${text || pollRes.statusText}`);
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pollJson: any = await pollRes.json();
-    if (pollJson.error) throw new Error(`Erreur upscale : ${pollJson.error}`);
-    if (pollJson.status === 'failed') {
-      throw new Error(`Upscale échoué : ${pollJson.error || 'erreur inconnue'}`);
-    }
-    if (pollJson.status === 'succeeded' && pollJson.image) {
-      return fit16x9AndCompress(pollJson.image);
-    }
-  }
-  throw new Error('Upscale timeout : le traitement a pris plus de 3 minutes.');
-}
