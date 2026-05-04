@@ -31,27 +31,34 @@ STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 28 mm, lumière 
 }
 
 /**
+ * Cadrage par défaut du tab Avatar — pré-rempli dans le champ "Contexte"
+ * et injecté tel quel dans le prompt. Reproduit le rendu LMS Metagora :
+ * personnage centré, plan 3/4 buste, face caméra, boutique en arrière-plan.
+ */
+export const DEFAULT_AVATAR_CADRAGE = `Avatar centré horizontalement dans l'image, au premier plan, plan américain (visible de la tête jusqu'à mi-cuisse / taille), face à la caméra dans une posture d'accueil naturelle, comme un vendeur qui s'adresse au client. La boutique reste pleinement visible derrière le personnage et de chaque côté, légèrement défocalisée pour mettre le personnage en valeur. Échelle réaliste : la tête de l'avatar atteint environ 60% de la hauteur de l'image.`;
+
+/**
  * Prompt pour la fusion avatar + fond de boutique.
  *
  * Deux images sont fournies dans cet ordre :
  *  1. Avatar (personnage / client virtuel)
  *  2. Fond de boutique (intérieur magasin)
  *
- * Le contexte additionnel (optionnel) est inséré pour préciser la pose,
- * l'action, le moment, etc.
+ * Le contexte (cadrage + détails optionnels) est injecté tel quel comme
+ * consigne forte. Si vide, on retombe sur DEFAULT_AVATAR_CADRAGE.
  */
 export function buildAvatarPrompt(context: string): string {
-  const c = (context || '').trim();
+  const c = (context || '').trim() || DEFAULT_AVATAR_CADRAGE;
   return `Compose une seule image photoréaliste : place le personnage de l'image 1 (avatar) à l'intérieur de la boutique de l'image 2 (décor).
 
 CONSIGNES STRICTES :
 1. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la tenue et les accessoires du personnage de l'image 1. Le personnage doit rester reconnaissable au pixel près.
 2. Préserve EXACTEMENT l'architecture, l'éclairage, les produits, les vitrines, le sol, les murs et la perspective de la boutique de l'image 2.
-3. Intègre le personnage de manière naturelle : pose crédible de client/visiteur, ombres portées cohérentes avec la lumière de la boutique, échelle réaliste par rapport au mobilier.
-4. Lumière et balance des blancs unifiées entre le personnage et le décor (pas de "découpe collée").
-5. Un seul personnage visible, au premier plan ou en interaction avec un présentoir.${c ? `\n6. Contexte additionnel : ${c}` : ''}
+3. CADRAGE — règle prioritaire : ${c}
+4. Lumière et balance des blancs unifiées entre le personnage et le décor : ombres portées cohérentes avec la lumière de la boutique, échelle réaliste par rapport au mobilier (pas d'effet "découpe collée").
+5. Un seul personnage visible.
 
 STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm pleine ouverture, lumière naturelle douce, format 16:9 paysage.
 
-À ÉVITER : visage différent du personnage source, plusieurs personnes, architecture modifiée, ombre incohérente, effet collage / découpage, style cartoon, texte illisible, watermark.`;
+À ÉVITER : visage différent du personnage source, plusieurs personnes, architecture modifiée, ombre incohérente, effet collage / découpage, style cartoon, texte illisible, watermark, cadrage trop large où le personnage devient minuscule.`;
 }

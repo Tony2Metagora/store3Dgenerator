@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { buildBrandPrompt, buildAvatarPrompt } from './brands';
+import { buildBrandPrompt, buildAvatarPrompt, DEFAULT_AVATAR_CADRAGE } from './brands';
 import { MOULES, getMouleById, type MouleCategory } from './moules';
 import { loadMoule, saveMoule, listMouleIds } from './moulesStore';
 import {
@@ -56,7 +56,7 @@ export default function App() {
   const [boutiqueBgImage, setBoutiqueBgImage] = useState<string | null>(null);
   const [boutiqueBgName, setBoutiqueBgName] = useState<string>('');
   const [boutiqueBgDragging, setBoutiqueBgDragging] = useState(false);
-  const [avatarContext, setAvatarContext] = useState<string>('');
+  const [avatarContext, setAvatarContext] = useState<string>(DEFAULT_AVATAR_CADRAGE);
   const [avatarPrompt, setAvatarPrompt] = useState<string>('');
 
   // Preview variants
@@ -775,21 +775,26 @@ export default function App() {
               )}
             </div>
 
-            {/* Étape 3 — Contexte optionnel */}
+            {/* Étape 3 — Cadrage / contexte (pré-rempli, modifiable) */}
             <div className="card" style={{ marginTop: '1rem' }}>
-              <h2><span className="step-num">3</span> Contexte (optionnel)</h2>
+              <h2><span className="step-num">3</span> Cadrage du personnage</h2>
               <div className="field">
-                <label htmlFor="avatarContext">Pose, action ou détail à préciser</label>
-                <input
+                <label htmlFor="avatarContext">
+                  Comment placer l&apos;avatar (modifiable, pré-rempli avec le cadrage type LMS Metagora)
+                </label>
+                <textarea
                   id="avatarContext"
-                  type="text"
                   value={avatarContext}
                   onChange={(e) => setAvatarContext(e.target.value)}
-                  placeholder="Ex. : en train d'examiner un produit en vitrine"
+                  placeholder="Ex. : avatar centré au premier plan, plan 3/4 buste, face caméra…"
+                  rows={5}
                 />
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                  Cette consigne est injectée comme règle prioritaire dans le prompt. Si vide, le cadrage par défaut est utilisé.
+                </p>
               </div>
               <details className="prompt-details">
-                <summary>Prompt généré (modifiable)</summary>
+                <summary>Prompt complet généré (modifiable)</summary>
                 <textarea value={avatarPrompt} onChange={(e) => setAvatarPrompt(e.target.value)} rows={10} />
               </details>
             </div>
