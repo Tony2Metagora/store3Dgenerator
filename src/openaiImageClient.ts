@@ -185,14 +185,29 @@ export async function callAzureOpenAIBatch(
   prompt: string,
   count = 3
 ): Promise<string[]> {
-  const promises = Array.from({ length: count }, () =>
-    callAzureOpenAI(modelImage, brandImage, prompt).catch((err) => {
-      console.warn('Variante Azure échouée :', err);
-      return null;
-    })
+  const settled = await Promise.all(
+    Array.from({ length: count }, () =>
+      callAzureOpenAI(modelImage, brandImage, prompt).then(
+        (img) => ({ ok: true as const, img }),
+        (err: unknown) => ({ ok: false as const, err })
+      )
+    )
   );
-  const results = await Promise.all(promises);
-  return results.filter((r): r is string => r !== null);
+  const successes = settled.flatMap((r) => (r.ok ? [r.img] : []));
+  if (successes.length === 0) {
+    const failures = settled.flatMap((r) => (r.ok ? [] : [r.err]));
+    console.error('[callAzureOpenAIBatch] toutes les variantes ont échoué :', failures);
+    const first = failures[0];
+    const msg = first instanceof Error ? first.message : String(first || 'erreur inconnue');
+    throw new Error(`Les ${count} variantes Azure ont échoué. Détail : ${msg}`);
+  }
+  if (successes.length < count) {
+    console.warn(
+      `[callAzureOpenAIBatch] ${count - successes.length} variante(s) échouée(s) sur ${count}`,
+      settled.filter((r) => !r.ok)
+    );
+  }
+  return successes;
 }
 
 export async function generateMouleFromAzure(prompt: string): Promise<string> {

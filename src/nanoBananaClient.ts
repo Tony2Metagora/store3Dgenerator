@@ -197,14 +197,29 @@ export async function callNanoBananaBatch(
   prompt: string,
   count = 3
 ): Promise<string[]> {
-  const promises = Array.from({ length: count }, () =>
-    callNanoBanana(modelImageBase64, brandImageBase64, prompt).catch((err) => {
-      console.warn('Variante échouée :', err);
-      return null;
-    })
+  const settled = await Promise.all(
+    Array.from({ length: count }, () =>
+      callNanoBanana(modelImageBase64, brandImageBase64, prompt).then(
+        (img) => ({ ok: true as const, img }),
+        (err: unknown) => ({ ok: false as const, err })
+      )
+    )
   );
-  const results = await Promise.all(promises);
-  return results.filter((r): r is string => r !== null);
+  const successes = settled.flatMap((r) => (r.ok ? [r.img] : []));
+  if (successes.length === 0) {
+    const failures = settled.flatMap((r) => (r.ok ? [] : [r.err]));
+    console.error('[callNanoBananaBatch] toutes les variantes ont échoué :', failures);
+    const first = failures[0];
+    const msg = first instanceof Error ? first.message : String(first || 'erreur inconnue');
+    throw new Error(`Les ${count} variantes Gemini ont échoué. Détail : ${msg}`);
+  }
+  if (successes.length < count) {
+    console.warn(
+      `[callNanoBananaBatch] ${count - successes.length} variante(s) échouée(s) sur ${count}`,
+      settled.filter((r) => !r.ok)
+    );
+  }
+  return successes;
 }
 
 /**
