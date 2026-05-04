@@ -136,6 +136,9 @@ async function callImagesEdits(images: string[], prompt: string): Promise<string
   const primaryUrl = normalizeAzureUrl(rawEndpoint, 'edits');
 
   // FormData factory : doit être recréée pour chaque tentative (le body est consommé par fetch).
+  // Azure exige `image` pour 1 seule image, `image[]` pour plusieurs (sinon erreur
+  // "Duplicate parameter: 'image'").
+  const fieldName = images.length > 1 ? 'image[]' : 'image';
   const buildFormData = () => {
     const fd = new FormData();
     fd.append('prompt', prompt);
@@ -144,7 +147,7 @@ async function callImagesEdits(images: string[], prompt: string): Promise<string
     fd.append('quality', 'high');
     images.forEach((dataUrl, idx) => {
       const { blob, ext } = dataUrlToBlob(dataUrl);
-      fd.append('image', blob, `input-${idx}.${ext}`);
+      fd.append(fieldName, blob, `input-${idx}.${ext}`);
     });
     return fd;
   };
