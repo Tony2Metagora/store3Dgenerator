@@ -27,6 +27,35 @@ export function setAzureConfig(endpoint: string, apiKey: string) {
 function getEndpoint() { return runtimeAzureEndpoint || ''; }
 function getApiKey() { return runtimeAzureApiKey || ''; }
 
+const FETCH_TIMEOUT_MS = 120_000; // 2 min — gpt-image-2 quality=high prend 30-90s typique
+
+/**
+ * Wrap fetch avec un AbortController qui kill la requête après FETCH_TIMEOUT_MS.
+ * Évite le "load infini" si CORS bloque ou si le réseau pend.
+ * Convertit aussi les erreurs CORS/network en message lisible.
+ */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(`Timeout après ${FETCH_TIMEOUT_MS / 1000}s — l'API Azure n'a pas répondu.`);
+    }
+    if (err instanceof TypeError && /fetch/i.test(err.message)) {
+      throw new Error(
+        `Échec réseau (${err.message}). Cause probable : CORS bloqué par Azure depuis le navigateur. ` +
+        `Vérifiez la console F12 (onglet Network) pour confirmer. Solution : configurer CORS sur la ressource Azure ` +
+        `OU passer par un proxy Cloudflare Worker.`
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function dataUrlToBlob(dataUrl: string): { blob: Blob; ext: string } {
   const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/s);
   if (!match) throw new Error("Format d'image invalide.");
@@ -104,7 +133,7 @@ async function callImagesEdits(images: string[], prompt: string): Promise<string
     fd.append('image', blob, `input-${idx}.${ext}`);
   });
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}` },
     body: fd,
@@ -121,7 +150,7 @@ async function callImagesGenerations(prompt: string): Promise<string> {
   const { rawEndpoint, apiKey } = ensureCreds();
   const endpoint = normalizeAzureUrl(rawEndpoint, 'generations');
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,

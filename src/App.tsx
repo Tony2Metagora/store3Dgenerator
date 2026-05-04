@@ -34,6 +34,7 @@ export default function App() {
   const [selectedMouleId, setSelectedMouleId] = useState<MouleCategory>('bijouterie');
   const [generatingMoules, setGeneratingMoules] = useState<Set<string>>(new Set());
   const [atelierOpen, setAtelierOpen] = useState(false);
+  const [mouleErrors, setMouleErrors] = useState<Record<string, string>>({});
 
   // Brand inputs
   const [brandImage, setBrandImage] = useState<string | null>(null);
@@ -177,12 +178,13 @@ export default function App() {
         ? await callAzureOpenAIBatch(selectedMouleData, brandImage, prompt, PREVIEW_COUNT)
         : await callNanoBananaBatch(selectedMouleData, brandImage, prompt, PREVIEW_COUNT);
       if (results.length === 0) {
-        setError(`Aucune variante générée. Vérifiez votre ${provider === 'azure' ? 'clé Azure OpenAI' : 'clé Gemini'} et réessayez.`);
+        setError(`Aucune variante générée. Vérifiez votre ${provider === 'azure' ? 'clé Azure OpenAI' : 'clé Gemini'} et la console F12 pour le détail.`);
       } else {
         setVariants(results);
         setSelectedVariant(0);
       }
     } catch (err: unknown) {
+      console.error('[handleGenerate] échec :', err);
       setError(err instanceof Error ? err.message : 'Erreur inconnue.');
     } finally {
       setLoading(false);
@@ -194,6 +196,11 @@ export default function App() {
     const m = getMouleById(id);
     if (!m) return;
     setGeneratingMoules((prev) => new Set(prev).add(id));
+    setMouleErrors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     try {
       const dataUrl = provider === 'azure'
         ? await generateMouleFromAzure(m.genPrompt)
@@ -201,7 +208,9 @@ export default function App() {
       await saveMoule(id, dataUrl);
       setMoulesData((prev) => ({ ...prev, [id]: dataUrl }));
     } catch (err: unknown) {
-      setError(`Moule "${m.label}" : ${err instanceof Error ? err.message : 'erreur'}`);
+      const msg = err instanceof Error ? err.message : 'Erreur inconnue';
+      console.error(`[Atelier moule "${m.label}"] échec :`, err);
+      setMouleErrors((prev) => ({ ...prev, [id]: msg }));
     } finally {
       setGeneratingMoules((prev) => {
         const next = new Set(prev);
@@ -226,6 +235,7 @@ export default function App() {
       setAltSize(null);
       setEditPrompt('');
     } catch (err: unknown) {
+      console.error('[handleEdit] échec :', err);
       setResultError(err instanceof Error ? err.message : 'Erreur lors de la modification.');
     } finally {
       setEditing(false);
@@ -243,6 +253,7 @@ export default function App() {
       setVariants((prev) => prev.map((v, i) => (i === selectedVariant ? refined : v)));
       setAltSize(null);
     } catch (err: unknown) {
+      console.error('[handleRefine] échec :', err);
       setResultError(err instanceof Error ? err.message : 'Erreur lors du raffinement.');
     } finally {
       setRefining(false);
@@ -426,6 +437,7 @@ export default function App() {
             {MOULES.map((m) => {
               const img = moulesData[m.id];
               const busy = generatingMoules.has(m.id);
+              const moulErr = mouleErrors[m.id];
               return (
                 <div key={m.id} className="atelier-card">
                   <div className="atelier-thumb">
@@ -446,6 +458,26 @@ export default function App() {
                   >
                     {busy ? 'Génération…' : img ? 'Regénérer' : 'Générer'}
                   </button>
+                  {moulErr && (
+                    <div
+                      style={{
+                        marginTop: '0.5rem',
+                        padding: '0.5rem 0.6rem',
+                        background: '#fef2f2',
+                        border: '1px solid #fca5a5',
+                        borderRadius: '0.4rem',
+                        color: '#b91c1c',
+                        fontSize: '0.72rem',
+                        lineHeight: 1.4,
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      <strong style={{ display: 'block', marginBottom: '0.15rem' }}>
+                        Erreur — voir aussi F12 console
+                      </strong>
+                      {moulErr}
+                    </div>
+                  )}
                 </div>
               );
             })}
