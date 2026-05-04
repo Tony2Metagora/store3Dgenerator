@@ -29,3 +29,29 @@ STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 28 mm, lumière 
 
 À ÉVITER : logo absent ou dupliqué, architecture différente de l'image 1, style cartoon ou illustration, texte illisible, flou, watermark, personnes visibles, ambiance centre commercial générique.`;
 }
+
+/**
+ * Prompt pour la fusion avatar + fond de boutique.
+ *
+ * Deux images sont fournies dans cet ordre :
+ *  1. Avatar (personnage / client virtuel)
+ *  2. Fond de boutique (intérieur magasin)
+ *
+ * Le contexte additionnel (optionnel) est inséré pour préciser la pose,
+ * l'action, le moment, etc.
+ */
+export function buildAvatarPrompt(context: string): string {
+  const c = (context || '').trim();
+  return `Compose une seule image photoréaliste : place le personnage de l'image 1 (avatar) à l'intérieur de la boutique de l'image 2 (décor).
+
+CONSIGNES STRICTES :
+1. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la tenue et les accessoires du personnage de l'image 1. Le personnage doit rester reconnaissable au pixel près.
+2. Préserve EXACTEMENT l'architecture, l'éclairage, les produits, les vitrines, le sol, les murs et la perspective de la boutique de l'image 2.
+3. Intègre le personnage de manière naturelle : pose crédible de client/visiteur, ombres portées cohérentes avec la lumière de la boutique, échelle réaliste par rapport au mobilier.
+4. Lumière et balance des blancs unifiées entre le personnage et le décor (pas de "découpe collée").
+5. Un seul personnage visible, au premier plan ou en interaction avec un présentoir.${c ? `\n6. Contexte additionnel : ${c}` : ''}
+
+STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm pleine ouverture, lumière naturelle douce, format 16:9 paysage.
+
+À ÉVITER : visage différent du personnage source, plusieurs personnes, architecture modifiée, ombre incohérente, effet collage / découpage, style cartoon, texte illisible, watermark.`;
+}

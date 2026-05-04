@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { buildBrandPrompt } from './brands';
+import { buildBrandPrompt, buildAvatarPrompt } from './brands';
 import { MOULES, getMouleById, type MouleCategory } from './moules';
 import { loadMoule, saveMoule, listMouleIds } from './moulesStore';
 import {
@@ -24,10 +24,16 @@ import {
 import './styles.css';
 
 type Provider = 'gemini' | 'azure';
+type Tab = 'boutique' | 'avatar';
 
 const PREVIEW_COUNT = 3;
 
 export default function App() {
+  // Tabs (workflow actif)
+  const [activeTab, setActiveTab] = useState<Tab>(
+    () => (localStorage.getItem('active_tab') as Tab) || 'boutique'
+  );
+
   // Moules
   const [moulesData, setMoulesData] = useState<Record<string, string | null>>({});
   const [moulesReady, setMoulesReady] = useState(false);
@@ -36,12 +42,22 @@ export default function App() {
   const [atelierOpen, setAtelierOpen] = useState(false);
   const [mouleErrors, setMouleErrors] = useState<Record<string, string>>({});
 
-  // Brand inputs
+  // Brand inputs (tab Boutique)
   const [brandImage, setBrandImage] = useState<string | null>(null);
   const [brandName, setBrandName] = useState<string>('');
   const [marque, setMarque] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [prompt, setPrompt] = useState<string>('');
+
+  // Avatar inputs (tab Avatar dans boutique)
+  const [avatarImage, setAvatarImage] = useState<string | null>(null);
+  const [avatarName, setAvatarName] = useState<string>('');
+  const [avatarDragging, setAvatarDragging] = useState(false);
+  const [boutiqueBgImage, setBoutiqueBgImage] = useState<string | null>(null);
+  const [boutiqueBgName, setBoutiqueBgName] = useState<string>('');
+  const [boutiqueBgDragging, setBoutiqueBgDragging] = useState(false);
+  const [avatarContext, setAvatarContext] = useState<string>('');
+  const [avatarPrompt, setAvatarPrompt] = useState<string>('');
 
   // Preview variants
   const [variants, setVariants] = useState<string[]>([]);
@@ -135,6 +151,21 @@ export default function App() {
     setPrompt(buildBrandPrompt(marque, description, moule));
   }, [marque, description, selectedMouleId]);
 
+  // Met à jour le prompt avatar quand le contexte change
+  useEffect(() => {
+    setAvatarPrompt(buildAvatarPrompt(avatarContext));
+  }, [avatarContext]);
+
+  // Persiste le tab actif et reset les variantes au changement
+  useEffect(() => {
+    localStorage.setItem('active_tab', activeTab);
+    setVariants([]);
+    setSelectedVariant(null);
+    setError(null);
+    setResultError(null);
+    setAltSize(null);
+  }, [activeTab]);
+
   const selectedMouleData = moulesData[selectedMouleId] ?? null;
 
   // ─── Upload photo marque ───
@@ -164,6 +195,56 @@ export default function App() {
     if (file) readBrandFile(file);
   }, []);
 
+  // ─── Upload Avatar (tab Avatar) ───
+  const readAvatarFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setAvatarName(file.name);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAvatarImage(reader.result as string);
+      setVariants([]);
+      setSelectedVariant(null);
+      setError(null);
+      setResultError(null);
+    };
+    reader.readAsDataURL(file);
+  };
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) readAvatarFile(file);
+  };
+  const handleAvatarDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setAvatarDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) readAvatarFile(file);
+  }, []);
+
+  // ─── Upload Fond de boutique (tab Avatar) ───
+  const readBoutiqueBgFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setBoutiqueBgName(file.name);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setBoutiqueBgImage(reader.result as string);
+      setVariants([]);
+      setSelectedVariant(null);
+      setError(null);
+      setResultError(null);
+    };
+    reader.readAsDataURL(file);
+  };
+  const handleBoutiqueBgFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) readBoutiqueBgFile(file);
+  };
+  const handleBoutiqueBgDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setBoutiqueBgDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) readBoutiqueBgFile(file);
+  }, []);
+
   // ─── Génération 3 variantes en parallèle (dispatch selon provider) ───
   const handleGenerate = async () => {
     if (!selectedMouleData || !brandImage) return;
@@ -185,6 +266,34 @@ export default function App() {
       }
     } catch (err: unknown) {
       console.error('[handleGenerate] échec :', err);
+      setError(err instanceof Error ? err.message : 'Erreur inconnue.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Génération avatar dans boutique (tab Avatar — dispatch selon provider) ───
+  const handleGenerateAvatar = async () => {
+    if (!avatarImage || !boutiqueBgImage) return;
+    setLoading(true);
+    setError(null);
+    setResultError(null);
+    setVariants([]);
+    setSelectedVariant(null);
+    setAltSize(null);
+    try {
+      // Ordre des images : 1 = avatar, 2 = fond de boutique (cohérent avec buildAvatarPrompt)
+      const results = provider === 'azure'
+        ? await callAzureOpenAIBatch(avatarImage, boutiqueBgImage, avatarPrompt, PREVIEW_COUNT)
+        : await callNanoBananaBatch(avatarImage, boutiqueBgImage, avatarPrompt, PREVIEW_COUNT);
+      if (results.length === 0) {
+        setError(`Aucune variante générée. Vérifiez votre ${provider === 'azure' ? 'clé Azure OpenAI' : 'clé Gemini'} et la console F12 pour le détail.`);
+      } else {
+        setVariants(results);
+        setSelectedVariant(0);
+      }
+    } catch (err: unknown) {
+      console.error('[handleGenerateAvatar] échec :', err);
       setError(err instanceof Error ? err.message : 'Erreur inconnue.');
     } finally {
       setLoading(false);
@@ -301,7 +410,8 @@ export default function App() {
   const isBusy = editing || refining || resizing;
   const missingMoules = MOULES.filter((m) => !moulesData[m.id]);
   const activeKey = provider === 'azure' ? azureKey : apiKey;
-  const canGenerate = !!selectedMouleData && !!brandImage && !!activeKey && !loading;
+  const canGenerateBoutique = !!selectedMouleData && !!brandImage && !!activeKey && !loading;
+  const canGenerateAvatar = !!avatarImage && !!boutiqueBgImage && !!activeKey && !loading;
 
   return (
     <div className="app">
@@ -420,7 +530,38 @@ export default function App() {
         )}
       </div>
 
-      {/* Atelier Moules */}
+      {/* Tabs : workflow actif */}
+      <div className="card" style={{ marginBottom: '1rem', padding: '0.4rem' }}>
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          {([
+            { key: 'boutique' as Tab, label: 'Fond de boutique' },
+            { key: 'avatar' as Tab, label: 'Avatar dans boutique' },
+          ]).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setActiveTab(t.key)}
+              style={{
+                flex: 1,
+                padding: '0.6rem 1rem',
+                border: 'none',
+                borderRadius: '0.5rem',
+                cursor: 'pointer',
+                fontSize: '0.95rem',
+                fontWeight: activeTab === t.key ? 600 : 500,
+                background: activeTab === t.key ? 'var(--accent)' : 'transparent',
+                color: activeTab === t.key ? '#fff' : 'var(--text-muted)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Atelier Moules — uniquement sur tab Boutique */}
+      {activeTab === 'boutique' && (
       <div className="card atelier" style={{ marginBottom: '1rem' }}>
         <button
           className="btn-toggle"
@@ -490,10 +631,13 @@ export default function App() {
           </p>
         )}
       </div>
+      )}
 
       <div className="layout">
-        {/* ── Colonne gauche : Contrôles ── */}
+        {/* ── Colonne gauche : Contrôles (varie selon le tab) ── */}
         <div className="controls">
+          {/* TAB BOUTIQUE — étapes 1 à 4 (moule + photo magasin → variantes) */}
+          {activeTab === 'boutique' && (<>
           {/* Étape 1 — Choisir le moule */}
           <div className="card">
             <h2><span className="step-num">1</span> Choisir le moule</h2>
@@ -575,7 +719,7 @@ export default function App() {
             <h2><span className="step-num">4</span> Générer {PREVIEW_COUNT} variantes</h2>
             <button
               className="btn-generate"
-              disabled={!canGenerate}
+              disabled={!canGenerateBoutique}
               onClick={handleGenerate}
             >
               {loading ? `Génération de ${PREVIEW_COUNT} variantes…` : `Générer ${PREVIEW_COUNT} variantes`}
@@ -587,6 +731,85 @@ export default function App() {
             {!brandImage && <p className="hint">Importez la photo du magasin (étape 2).</p>}
             {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
           </div>
+          </>)}
+
+          {/* TAB AVATAR — étapes 1 à 3 (avatar + fond → variantes fusionnées) */}
+          {activeTab === 'avatar' && (<>
+            {/* Étape 1 — Upload avatar */}
+            <div className="card">
+              <h2><span className="step-num">1</span> Importer l&apos;avatar (personnage)</h2>
+              <div
+                className={`upload-zone ${avatarDragging ? 'dragging' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setAvatarDragging(true); }}
+                onDragLeave={() => setAvatarDragging(false)}
+                onDrop={handleAvatarDrop}
+              >
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAvatarFileChange} />
+                <div className="icon">🧑</div>
+                <p>Glissez-déposez ou cliquez pour sélectionner<br />une image d&apos;avatar (JPEG / PNG / WebP)</p>
+              </div>
+              {avatarImage && (
+                <div className="upload-preview">
+                  <img src={avatarImage} alt={avatarName} />
+                </div>
+              )}
+            </div>
+
+            {/* Étape 2 — Upload fond de boutique */}
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2><span className="step-num">2</span> Importer le fond de boutique</h2>
+              <div
+                className={`upload-zone ${boutiqueBgDragging ? 'dragging' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setBoutiqueBgDragging(true); }}
+                onDragLeave={() => setBoutiqueBgDragging(false)}
+                onDrop={handleBoutiqueBgDrop}
+              >
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleBoutiqueBgFileChange} />
+                <div className="icon">🏬</div>
+                <p>Glissez-déposez ou cliquez pour sélectionner<br />le décor de boutique (JPEG / PNG / WebP)</p>
+              </div>
+              {boutiqueBgImage && (
+                <div className="upload-preview">
+                  <img src={boutiqueBgImage} alt={boutiqueBgName} />
+                </div>
+              )}
+            </div>
+
+            {/* Étape 3 — Contexte optionnel */}
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2><span className="step-num">3</span> Contexte (optionnel)</h2>
+              <div className="field">
+                <label htmlFor="avatarContext">Pose, action ou détail à préciser</label>
+                <input
+                  id="avatarContext"
+                  type="text"
+                  value={avatarContext}
+                  onChange={(e) => setAvatarContext(e.target.value)}
+                  placeholder="Ex. : en train d'examiner un produit en vitrine"
+                />
+              </div>
+              <details className="prompt-details">
+                <summary>Prompt généré (modifiable)</summary>
+                <textarea value={avatarPrompt} onChange={(e) => setAvatarPrompt(e.target.value)} rows={10} />
+              </details>
+            </div>
+
+            {/* Étape 4 — Générer */}
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2><span className="step-num">4</span> Fusionner ({PREVIEW_COUNT} variantes)</h2>
+              <button
+                className="btn-generate"
+                disabled={!canGenerateAvatar}
+                onClick={handleGenerateAvatar}
+              >
+                {loading ? `Fusion de ${PREVIEW_COUNT} variantes…` : `Fusionner (${PREVIEW_COUNT} variantes)`}
+              </button>
+              {error && <div className="error-msg">{error}</div>}
+              {!avatarImage && <p className="hint">Importez l&apos;avatar (étape 1).</p>}
+              {!boutiqueBgImage && <p className="hint">Importez le fond de boutique (étape 2).</p>}
+              {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
+            </div>
+          </>)}
         </div>
 
         {/* ── Colonne droite : Previews + Actions ── */}
