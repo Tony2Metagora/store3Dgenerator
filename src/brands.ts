@@ -22,7 +22,7 @@ CONSIGNES STRICTES :
 1. Conserve exactement : l'angle de vue, la profondeur, la forme des murs, les colonnes, la disposition du mobilier, l'éclairage au plafond, le sol. La structure reste identique.
 2. Remplace TOUS les produits et supports de présentation (${fixtures}) par des étagères, vitrines ou tables adaptées aux ${d} de ${m}. Aucun produit ou mobilier d'origine ne doit subsister.
 3. Applique les codes visuels de ${m} visibles sur l'image 2 : palette de couleurs, matériaux, traitement des murs, signalétique, typographie.
-4. Place un seul logo ${m} bien visible au fond, sur un mur ou panneau. Pas de logo dupliqué.
+4. Place un seul logo ${m} bien visible au fond, sur un mur ou panneau LATÉRAL (côté gauche OU côté droit de l'image, jamais au centre ni derrière la caméra). Le centre de l'image doit rester dégagé pour qu'un personnage placé au milieu ne masque pas le logo. Pas de logo dupliqué.
 5. Les rayons et présentoirs sont pleinement garnis de ${d} typiques de ${m}, packaging cohérent avec la photo réelle.
 
 STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 28 mm, lumière naturelle douce, détails nets, format 16:9 paysage.
