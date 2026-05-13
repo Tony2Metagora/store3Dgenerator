@@ -1,7 +1,7 @@
 let runtimeEndpoint = '';
 let runtimeApiKey = '';
 let runtimeEditEndpoint = '';
-let runtimeUpscaleWorkerUrl = '';
+let runtimeFreepikApiKey = '';
 
 export function setApiConfig(endpoint: string, apiKey: string) {
   runtimeEndpoint = endpoint;
@@ -12,8 +12,8 @@ export function setEditEndpoint(url: string) {
   runtimeEditEndpoint = url;
 }
 
-export function setUpscaleWorkerUrl(url: string) {
-  runtimeUpscaleWorkerUrl = url.replace(/\/$/, '');
+export function setFreepikApiKey(key: string) {
+  runtimeFreepikApiKey = key;
 }
 
 function getEndpoint() {
@@ -275,49 +275,81 @@ IMPROVE ONLY: sharpness, fine texture detail on materials (wood grain, fabric we
 Output a photorealistic ultra-sharp 4K landscape photograph, 16:9 ratio, as if shot with a 35 mm full-frame camera at f/5.6, crisp focus throughout the scene.`;
 
 /**
- * Upscale via Magnific Illusio (Cloudflare Worker proxy → Freepik API).
- * Async : POST /  → { id }, puis polling GET /status?id=… jusqu'à
- * `succeeded` (typiquement 30s–2min). Retourne le dataUrl upscalé.
+ * Upscale via Magnific Illusio (appel direct Freepik API depuis le browser).
+ * Freepik accepte CORS * → on bypass le proxy Cloudflare Worker (qui était
+ * bloqué par anti-bot Freepik sur les IPs egress Workers).
+ * Async : POST → polling toutes les 5s, max ~3min. Retourne le dataUrl upscalé.
  */
 export async function upscaleWithMagnific(
   imageDataUrl: string,
-  opts: { scale?: 2 | 4 | 8; creativity?: number; resemblance?: number } = {}
+  opts: { scale?: 2 | 4 | 8 | 16; creativity?: number; resemblance?: number } = {}
 ): Promise<string> {
-  const base = runtimeUpscaleWorkerUrl;
-  if (!base) throw new Error("URL du worker d'upscale non configurée (settings API → Worker URL).");
+  const apiKey = runtimeFreepikApiKey;
+  if (!apiKey) throw new Error('Clé API Freepik non configurée (Paramètres API → Clé API Freepik).');
   if (!imageDataUrl.startsWith('data:image/')) throw new Error('Image invalide (data URL attendue).');
 
+  const m = imageDataUrl.match(/^data:image\/[a-zA-Z+]+;base64,(.+)$/s);
+  if (!m) throw new Error('Format data URL invalide');
+  const imageB64 = m[1];
+
+  const scaleNum = opts.scale ?? 4;
+  const scale_factor = scaleNum >= 16 ? '16x' : scaleNum >= 8 ? '8x' : scaleNum >= 4 ? '4x' : '2x';
+
   // 1. Création du job
-  const createRes = await fetch(base + '/', {
+  const createRes = await fetch('https://api.freepik.com/v1/ai/image-upscaler', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'x-freepik-api-key': apiKey,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
-      image: imageDataUrl,
-      scale: opts.scale ?? 4,
-      creativity: opts.creativity,
-      resemblance: opts.resemblance,
+      image: imageB64,
+      scale_factor,
+      optimized_for: 'art_and_logos',
+      creativity: opts.creativity ?? 3,
+      hdr: 5,
+      resemblance: opts.resemblance ?? 70,
+      fractality: 1,
+      engine: 'magnific_illusio',
     }),
   });
   if (!createRes.ok) {
     const err = await createRes.text().catch(() => '');
-    throw new Error(`Upscale (create) HTTP ${createRes.status}: ${err.slice(0, 200)}`);
+    throw new Error(`Magnific create HTTP ${createRes.status}: ${err.slice(0, 250)}`);
   }
-  const created = await createRes.json() as { id?: string; error?: string };
-  if (!created.id) throw new Error(created.error || 'Upscale: pas de task_id retourné');
+  const created = await createRes.json() as { data?: { task_id?: string } };
+  const taskId = created?.data?.task_id;
+  if (!taskId) throw new Error('Magnific : task_id manquant');
 
   // 2. Polling (max ~3min)
   const maxAttempts = 36; // 36 × 5s = 180s
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 5000));
-    const pollRes = await fetch(base + '/status?id=' + encodeURIComponent(created.id));
-    if (!pollRes.ok) continue; // transient — on retry
-    const data = await pollRes.json() as { status?: string; image?: string; error?: string };
-    const status = String(data.status || '').toLowerCase();
-    if (status === 'succeeded' && data.image) return data.image;
-    if (status === 'failed') throw new Error('Upscale échoué : ' + (data.error || 'erreur inconnue'));
-    // sinon : in_progress / created / processing → on continue
+    const pollRes = await fetch(`https://api.freepik.com/v1/ai/image-upscaler/${encodeURIComponent(taskId)}`, {
+      headers: { 'x-freepik-api-key': apiKey },
+    });
+    if (!pollRes.ok) continue;
+    const json = await pollRes.json() as { data?: { status?: string; generated?: string[]; error?: string } };
+    const data = json?.data;
+    const status = String(data?.status || '').toUpperCase();
+    if (status === 'FAILED') throw new Error('Magnific échoué : ' + (data?.error || 'erreur inconnue'));
+    if (status === 'COMPLETED') {
+      const outUrl = data?.generated?.[0];
+      if (!outUrl) throw new Error('Magnific : pas d\'image générée');
+      // Fetch + convert to data URL pour rester compat avec le reste du pipeline
+      const imgRes = await fetch(outUrl);
+      if (!imgRes.ok) throw new Error(`Magnific image fetch HTTP ${imgRes.status}`);
+      const blob = await imgRes.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    }
+    // sinon : CREATED / IN_PROGRESS → on continue
   }
-  throw new Error('Upscale: timeout (>3min) — réessaie ou vérifie la quota Freepik.');
+  throw new Error('Magnific : timeout (>3min) — réessaie ou vérifie le quota Freepik.');
 }
 
 export async function refineImageQuality(imageDataUrl: string): Promise<string> {

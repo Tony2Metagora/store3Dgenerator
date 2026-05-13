@@ -16,7 +16,7 @@ import {
   generateMouleFromPrompt,
   setApiConfig,
   setEditEndpoint,
-  setUpscaleWorkerUrl,
+  setFreepikApiKey,
   editImageWithGemini,
   refineImageQuality,
   resizeToTargetHeight,
@@ -128,8 +128,8 @@ export default function App() {
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent'
   );
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('nb_apikey') || '');
-  const [upscaleWorkerUrlState, setUpscaleWorkerUrlState] = useState<string>(
-    () => localStorage.getItem('nb_upscale_url') || ''
+  const [freepikApiKeyState, setFreepikApiKeyState] = useState<string>(
+    () => localStorage.getItem('freepik_api_key') || ''
   );
   const [upscaling, setUpscaling] = useState(false);
   const [azureEndpoint, setAzureEndpoint] = useState<string>(
@@ -169,11 +169,15 @@ export default function App() {
     })();
   }, []);
 
-  // Persist URL du worker d'upscale Magnific (Cloudflare).
+  // Persist la clé API Freepik (appel direct Magnific Illusio depuis le browser).
   useEffect(() => {
-    localStorage.setItem('nb_upscale_url', upscaleWorkerUrlState);
-    setUpscaleWorkerUrl(upscaleWorkerUrlState);
-  }, [upscaleWorkerUrlState]);
+    localStorage.setItem('freepik_api_key', freepikApiKeyState);
+    setFreepikApiKey(freepikApiKeyState);
+  }, [freepikApiKeyState]);
+
+  // Migration : si l'ancienne clé localStorage 'nb_upscale_url' existait, on la
+  // purge (legacy worker — bypass désormais direct via API Freepik).
+  useEffect(() => { localStorage.removeItem('nb_upscale_url'); }, []);
 
   // Persist & sync API config (les 2 jeux de credentials persistent en parallèle)
   useEffect(() => {
@@ -525,8 +529,8 @@ export default function App() {
 
   const handleUpscale = async () => {
     if (!activeImage || selectedVariant === null) return;
-    if (!upscaleWorkerUrlState) {
-      setResultError("URL du worker d'upscale non configurée — renseigne-la dans Paramètres API.");
+    if (!freepikApiKeyState) {
+      setResultError('Clé API Freepik non configurée — renseigne-la dans Paramètres API.');
       return;
     }
     setUpscaling(true);
@@ -701,17 +705,18 @@ export default function App() {
             )}
 
             <div className="field" style={{ marginTop: '0.75rem', borderTop: '1px dashed var(--border)', paddingTop: '0.75rem' }}>
-              <label htmlFor="upscaleWorkerUrl">URL Worker Upscale (Magnific Illusio via Freepik)</label>
+              <label htmlFor="freepikApiKey">Clé API Freepik (Magnific Illusio)</label>
               <input
-                id="upscaleWorkerUrl"
-                type="url"
-                value={upscaleWorkerUrlState}
-                onChange={(e) => setUpscaleWorkerUrlState(e.target.value)}
-                placeholder="https://upscale-worker.<ton-sous-domaine>.workers.dev"
+                id="freepikApiKey"
+                type="password"
+                value={freepikApiKeyState}
+                onChange={(e) => setFreepikApiKeyState(e.target.value)}
+                placeholder="FPSXxxxxxxxxxxxxxxxxxxxxxxxxx"
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                URL du Cloudflare Worker déployé qui appelle l&apos;API Freepik Magnific Illusio.
-                Une fois renseignée, le bouton <strong>🔍 Upscale Magnific x4</strong> apparaît sur chaque image générée.
+                Crée la sur <a href="https://www.freepik.com/api" target="_blank" rel="noopener noreferrer">freepik.com/api</a> (plan API requis).
+                Une fois renseignée, le bouton <strong>🔍 Upscale Magnific x4</strong> s&apos;active sur chaque image générée.
+                Appel direct depuis le browser (CORS ouvert) — pas de proxy serveur.
               </p>
             </div>
 
@@ -1227,8 +1232,8 @@ export default function App() {
                     <button
                       className="btn-action btn-upscale"
                       onClick={handleUpscale}
-                      disabled={isBusy || !upscaleWorkerUrlState}
-                      title={upscaleWorkerUrlState ? 'Upscale x4 via Magnific Illusio (30s-2min)' : "Configure d'abord l'URL du worker dans les paramètres API"}
+                      disabled={isBusy || !freepikApiKeyState}
+                      title={freepikApiKeyState ? 'Upscale x4 via Magnific Illusio (30s-2min)' : "Configure d'abord la clé API Freepik dans les paramètres"}
                     >
                       {upscaling ? '⏳ Upscale…' : '🔍 Upscale Magnific x4'}
                     </button>
