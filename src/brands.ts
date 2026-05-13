@@ -38,6 +38,14 @@ STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 28 mm, lumière 
 export const DEFAULT_AVATAR_CADRAGE = `Avatar centré horizontalement dans l'image, au premier plan, plan américain (visible de la tête jusqu'à mi-cuisse / taille), face à la caméra dans une posture d'accueil naturelle, comme un vendeur qui s'adresse au client. La boutique reste pleinement visible derrière le personnage et de chaque côté, légèrement défocalisée pour mettre le personnage en valeur. Échelle réaliste : la tête de l'avatar atteint environ 60% de la hauteur de l'image.`;
 
 /**
+ * Consigne d'expression — un léger sourire bouche fermée, accueillant mais
+ * discret. Réutilisée dans le prompt avatar ET dans le prompt accessoire pour
+ * garantir que l'expression est appliquée même si l'utilisateur arrive
+ * directement dans le tab Accessoires avec une image externe.
+ */
+const SMILE_INSTRUCTION = `Expression : léger sourire bouche fermée (lèvres jointes, coins de la bouche légèrement relevés, joues à peine soulevées), regard chaleureux. PAS de dents visibles, PAS de bouche ouverte. Posture accueillante de vendeur en magasin.`;
+
+/**
  * Prompt pour la fusion avatar + fond de boutique.
  *
  * Deux images sont fournies dans cet ordre :
@@ -52,15 +60,16 @@ export function buildAvatarPrompt(context: string): string {
   return `Compose une seule image photoréaliste : place le personnage de l'image 1 (avatar) à l'intérieur de la boutique de l'image 2 (décor).
 
 CONSIGNES STRICTES :
-1. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la tenue et les accessoires du personnage de l'image 1. Le personnage doit rester reconnaissable au pixel près.
-2. Préserve EXACTEMENT l'architecture, l'éclairage, les produits, les vitrines, le sol, les murs et la perspective de la boutique de l'image 2.
-3. CADRAGE — règle prioritaire : ${c}
-4. Lumière et balance des blancs unifiées entre le personnage et le décor : ombres portées cohérentes avec la lumière de la boutique, échelle réaliste par rapport au mobilier (pas d'effet "découpe collée").
-5. Un seul personnage visible.
+1. Préserve EXACTEMENT l'identité du personnage de l'image 1 (visage, traits, coiffure, morphologie, couleur de peau, tenue, accessoires existants). Le personnage doit rester reconnaissable au pixel près. SEULE EXCEPTION : l'expression du visage peut être ajustée selon la règle 2.
+2. EXPRESSION — règle prioritaire : ${SMILE_INSTRUCTION}
+3. Préserve EXACTEMENT l'architecture, l'éclairage, les produits, les vitrines, le sol, les murs et la perspective de la boutique de l'image 2.
+4. CADRAGE — règle prioritaire : ${c}
+5. Lumière et balance des blancs unifiées entre le personnage et le décor : ombres portées cohérentes avec la lumière de la boutique, échelle réaliste par rapport au mobilier (pas d'effet "découpe collée").
+6. Un seul personnage visible.
 
 STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm pleine ouverture, lumière naturelle douce, format 16:9 paysage.
 
-À ÉVITER : visage différent du personnage source, plusieurs personnes, architecture modifiée, ombre incohérente, effet collage / découpage, style cartoon, texte illisible, watermark, cadrage trop large où le personnage devient minuscule.`;
+À ÉVITER : visage différent du personnage source, bouche ouverte ou dents visibles, expression neutre/sévère/triste, plusieurs personnes, architecture modifiée, ombre incohérente, effet collage / découpage, style cartoon, texte illisible, watermark, cadrage trop large où le personnage devient minuscule.`;
 }
 
 // ─── Accessoires ─────────────────────────────────────────
@@ -108,6 +117,22 @@ export const ACCESSORY_DEFS: AccessoryDef[] = [
   },
 ];
 
+/**
+ * Échelle de référence par catégorie d'accessoire — sert à briefer l'IA pour
+ * qu'elle respecte la taille réelle de l'objet plutôt que de zoomer dessus.
+ * Couvre les tailles typiques observées sur ce type d'accessoire en magasin.
+ */
+const ACCESSORY_REAL_SCALE: Record<AccessoryCategory, string> = {
+  bijou:
+    "Échelle réelle : un bijou (collier, bracelet, bague, boucles, broche) est petit — un collier descend de 30 à 50 cm sur le buste, un bracelet fait 6 à 8 cm de diamètre au poignet, une bague et des boucles font quelques mm à 2 cm. NE PAS agrandir le bijou.",
+  foulard:
+    "Échelle réelle : un foulard / carré de soie fait 70 à 90 cm de côté ; déplié sur les épaules il couvre approximativement la largeur du buste. NE PAS faire occuper au foulard plus de la moitié haute du buste.",
+  sac:
+    "Échelle réelle : un sac à main typique (type Birkin 25, Kelly, hobo, tote moyen) mesure 20 à 35 cm de large pour 18 à 28 cm de haut. Sur le personnage, il occupe l'espace allant approximativement de la taille à la mi-cuisse quand il est porté à la main, OU est plaqué contre la hanche s'il est en bandoulière. Un sac à main n'est JAMAIS plus haut qu'entre la taille et le genou. NE PAS le faire occuper la moitié de l'image. NE PAS zoomer dessus.",
+  ceinture:
+    "Échelle réelle : une ceinture fait 2 à 5 cm de hauteur visible, posée à la taille naturelle, et fait le tour complet du buste. La boucle est centrée devant. NE PAS exagérer la largeur de la ceinture.",
+};
+
 export function getAccessoryDef(id: AccessoryCategory): AccessoryDef | undefined {
   return ACCESSORY_DEFS.find((a) => a.id === id);
 }
@@ -123,26 +148,68 @@ export function getAccessoryDef(id: AccessoryCategory): AccessoryDef | undefined
  * Règle clé : les accessoires sont CUMULATIFS (les accessoires déjà présents
  * sur l'image 1 doivent être conservés en plus du nouvel accessoire ajouté).
  *
- * @param accessory  Définition de l'accessoire à ajouter
- * @param extra      Instruction libre complémentaire saisie par l'utilisateur
- *                   (placement précis, main, posture, etc.) — vide si non utilisée
+ * @param accessory           Définition de l'accessoire à ajouter
+ * @param extra               Instruction libre complémentaire saisie par
+ *                            l'utilisateur (placement précis, main, posture,
+ *                            etc.) — vide si non utilisée
+ * @param visionDescription   Description automatique de l'accessoire produite
+ *                            par Vision juste avant l'appel (matériau, couleur,
+ *                            type, taille typique). Injectée comme brief visuel
+ *                            pour que gpt-image cible exactement le bon objet.
  */
-export function buildAccessoryPrompt(accessory: AccessoryDef, extra?: string): string {
+export function buildAccessoryPrompt(
+  accessory: AccessoryDef,
+  extra?: string,
+  visionDescription?: string
+): string {
   const extraBlock = (extra || '').trim()
     ? `\nINSTRUCTION COMPLÉMENTAIRE UTILISATEUR (priorité haute, à respecter en plus des consignes ci-dessus) :\n${extra!.trim()}\n`
+    : '';
+
+  const visionBlock = (visionDescription || '').trim()
+    ? `\nBRIEF VISUEL DE L'ACCESSOIRE (extrait automatiquement de l'image 2 — utilise-le pour reproduire fidèlement l'objet, sans l'agrandir ni le déformer) :\n${visionDescription!.trim()}\n`
     : '';
 
   return `Ajoute l'accessoire de l'image 2 (${accessory.itemDescription}) sur le personnage présent dans l'image 1, en respectant strictement le modèle de l'accessoire. L'accessoire de l'image 2 DOIT être clairement visible dans l'image finale.
 
 CONSIGNES STRICTES :
-1. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la tenue, la pose ET TOUS LES ACCESSOIRES DÉJÀ PRÉSENTS sur le personnage de l'image 1 (foulard, bijou, sac, ceinture, lunettes, chapeau, etc. déjà visibles doivent rester en place et visibles). Les accessoires sont CUMULATIFS — n'enlève ni ne remplace aucun élément existant.
-2. Préserve EXACTEMENT l'arrière-plan, l'architecture, l'éclairage, les vitrines, les produits, le sol et la perspective de l'image 1. Rien d'autre que l'ajout de l'accessoire ne doit changer.
-3. Place le nouvel accessoire ${accessory.bodyZone}. L'accessoire doit reprendre fidèlement la forme, la couleur, les matériaux, les détails et le style exact de l'image 2 (mêmes finitions, mêmes motifs, mêmes proportions).
-4. L'accessoire de l'image 2 DOIT apparaître dans le résultat — c'est l'objectif principal de l'opération. Si l'accessoire entre en conflit visuel avec un accessoire déjà présent, ajuste légèrement son placement pour qu'il reste visible (ex : ceinture par-dessus une chemise déjà nouée à la taille), mais ne supprime jamais l'accessoire existant.
-5. Lumière et ombres cohérentes avec la scène : l'accessoire reçoit la même direction de lumière que le personnage et projette des ombres réalistes, sans effet "collage" ni "détourage".
-6. Échelle réaliste : l'accessoire a une taille crédible par rapport au personnage et au cadre.
-${extraBlock}
-STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm, lumière naturelle douce, format 16:9 paysage. Le rendu final doit être indiscernable d'une photo réelle du personnage portant l'accessoire (et tous ceux déjà présents).
+1. CADRAGE IDENTIQUE — règle absolument prioritaire : le cadrage final doit être STRICTEMENT identique à celui de l'image 1 (mêmes bords haut/bas/gauche/droite, même focale apparente, même distance caméra-personnage, même portion du corps visible). N'effectue AUCUN zoom in, AUCUN zoom out, AUCUN recadrage, AUCUNE recomposition. Le personnage doit occuper exactement la même surface et la même position dans l'image finale que dans l'image 1. NE FOCALISE PAS sur l'accessoire au point de tronquer ou recadrer le personnage.
+2. Préserve EXACTEMENT l'identité du personnage de l'image 1 (visage, traits, coiffure, morphologie, couleur de peau, tenue, pose) ET TOUS LES ACCESSOIRES DÉJÀ PRÉSENTS (foulard, bijou, sac, ceinture, lunettes, chapeau, etc. déjà visibles restent en place et visibles). Les accessoires sont CUMULATIFS — n'enlève ni ne remplace aucun élément existant. SEULE EXCEPTION : l'expression peut être ajustée selon la règle 3.
+3. EXPRESSION — règle prioritaire : ${SMILE_INSTRUCTION}
+4. Préserve EXACTEMENT l'arrière-plan, l'architecture, l'éclairage, les vitrines, les produits, le sol et la perspective de l'image 1. Rien d'autre que l'ajout de l'accessoire (et l'ajustement d'expression de la règle 3) ne doit changer.
+5. Place le nouvel accessoire ${accessory.bodyZone}. L'accessoire doit reprendre fidèlement la forme, la couleur, les matériaux, les détails, les motifs et le style exact de l'image 2 (mêmes finitions, mêmes proportions internes).
+6. ÉCHELLE RÉELLE STRICTE : ${ACCESSORY_REAL_SCALE[accessory.id]} L'accessoire doit avoir une taille crédible par rapport à la morphologie du personnage tel qu'il apparaît dans l'image 1. Ne JAMAIS surdimensionner l'accessoire ; ne JAMAIS faire un gros plan dessus.
+7. L'accessoire de l'image 2 DOIT apparaître dans le résultat — c'est l'objectif principal de l'opération. Si l'accessoire entre en conflit visuel avec un accessoire déjà présent, ajuste légèrement son placement pour qu'il reste visible (ex : ceinture par-dessus une chemise déjà nouée à la taille), mais ne supprime jamais l'accessoire existant.
+8. Lumière et ombres cohérentes avec la scène : l'accessoire reçoit la même direction de lumière que le personnage et projette des ombres réalistes, sans effet "collage" ni "détourage".
+${extraBlock}${visionBlock}
+STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm, lumière naturelle douce, format 16:9 paysage. Le rendu final doit être indiscernable d'une photo réelle du personnage portant l'accessoire (et tous ceux déjà présents), avec le MÊME cadrage que l'image 1.
 
-À ÉVITER : supprimer ou remplacer un accessoire déjà présent sur le personnage, oublier d'ajouter l'accessoire de l'image 2, modifier le visage / la pose / les vêtements existants, dupliquer ou multiplier l'accessoire, mauvaise échelle, mauvaise position anatomique, ombres incohérentes, effet découpe-collage, style cartoon, watermark, texte illisible, modification du décor.`;
+À ÉVITER : zoom in sur l'accessoire, recadrage qui tronque le personnage, accessoire surdimensionné (un sac qui occupe la moitié de l'image, une ceinture épaisse comme un corset, etc.), supprimer ou remplacer un accessoire déjà présent, oublier d'ajouter l'accessoire de l'image 2, modifier le visage (sauf l'expression), bouche ouverte ou dents visibles, expression neutre/sévère/triste, modifier la pose / les vêtements existants, dupliquer ou multiplier l'accessoire, mauvaise position anatomique, ombres incohérentes, effet découpe-collage, style cartoon, watermark, texte illisible, modification du décor.`;
+}
+
+/**
+ * Prompt envoyé à un modèle Vision (gpt-5-2 ou gemini-2.5-flash) pour analyser
+ * l'image d'un accessoire et produire un brief visuel court et exploitable par
+ * gpt-image lors de l'ajout sur l'avatar.
+ *
+ * Sortie attendue : 3-6 lignes en français, factuelles, sans préambule ni
+ * conclusion. Pas de markdown, pas de listes à puces.
+ */
+export function buildAccessoryAnalysisPrompt(accessory: AccessoryDef): string {
+  return `Tu es un assistant qui prépare un brief visuel pour un modèle de génération d'images.
+
+L'image jointe est ${accessory.itemDescription}. Décris-la précisément en 3 à 6 lignes pour qu'un modèle text-to-image puisse la reproduire fidèlement quand on l'ajoutera sur un personnage existant.
+
+Inclure obligatoirement :
+- Type précis de l'objet (ex : "sac à main type Birkin", "carré de soie 90×90 cm", "collier ras-de-cou", "ceinture à boucle H")
+- Matériau principal et finition (ex : "cuir togo grainé mat", "soie satinée", "or jaune brossé")
+- Couleur(s) dominante(s) avec nuance (ex : "gold caramel", "bleu marine + crème + or")
+- Motifs visibles, logos, signes distinctifs (sans inventer)
+- Quincaillerie / détails (boucle, fermoir, cadenas, surpiqûres)
+- Dimensions réelles approximatives (largeur × hauteur en cm) pour cadrer la taille de l'objet sur le personnage. Si tu n'es pas sûr, donne une fourchette typique.
+- Placement recommandé sur le personnage en une demi-phrase (main, épaule, cou, taille…) cohérent avec le type d'objet.
+
+Format de sortie : prose factuelle en français, 3 à 6 lignes, sans préambule (pas de "Voici la description…"), sans markdown, sans liste à puces, sans conclusion. Termine la dernière ligne par un point.
+
+À ÉVITER : inventer des marques ou des détails non visibles, faire de la prose marketing, suggérer un cadrage caméra (le cadrage est déjà fixé par l'image cible), surdimensionner l'objet.`;
 }

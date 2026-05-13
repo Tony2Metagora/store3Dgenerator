@@ -31,6 +31,7 @@ import {
   refineImageWithAzureOpenAI,
   setAzureConfig,
 } from './openaiImageClient';
+import { analyzeAccessorySafe } from './visionClient';
 import './styles.css';
 
 type Provider = 'gemini' | 'azure';
@@ -84,6 +85,7 @@ export default function App() {
   const [variantBadges, setVariantBadges] = useState<string[]>([]); // labels custom (sinon "1", "2", "3")
   const [selectedVariant, setSelectedVariant] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [accAnalyzing, setAccAnalyzing] = useState(false); // phase Vision (analyse accessoire) avant le batch d'image gen
 
   // Post-actions
   const [editing, setEditing] = useState(false);
@@ -394,7 +396,25 @@ export default function App() {
     setAltSize(null);
 
     try {
-      const prompt = buildAccessoryPrompt(acc, accExtraInstruction);
+      // 1. Analyse Vision : produit un brief textuel précis de l'accessoire
+      //    (type, matériau, couleur, dimensions réelles, placement) que gpt-image
+      //    pourra cibler. Évite que le modèle invente une taille ou un cadrage.
+      //    En cas d'échec Vision, on retombe sur un brief vide (silencieux).
+      setAccAnalyzing(true);
+      console.log(`[Accessoires] analyse Vision ${acc.label}…`);
+      const visionDescription = await analyzeAccessorySafe(provider, accImage, acc, {
+        azureEndpoint,
+        azureKey,
+        geminiEndpoint: apiEndpoint,
+        geminiKey: apiKey,
+      });
+      if (visionDescription) {
+        console.log(`[Accessoires] brief Vision ${acc.label} :\n${visionDescription}`);
+      }
+      setAccAnalyzing(false);
+
+      // 2. Génération des 3 variantes avec le prompt enrichi du brief Vision.
+      const prompt = buildAccessoryPrompt(acc, accExtraInstruction, visionDescription);
       const results = provider === 'azure'
         ? await callAzureOpenAIBatch(accStartImage, accImage, prompt, PREVIEW_COUNT, 'medium')
         : await callNanoBananaBatch(accStartImage, accImage, prompt, PREVIEW_COUNT);
@@ -410,6 +430,7 @@ export default function App() {
       console.error('[handleGenerateAccessories] échec :', err);
       setError(err instanceof Error ? err.message : 'Erreur inconnue.');
     } finally {
+      setAccAnalyzing(false);
       setLoading(false);
     }
   };
@@ -1095,7 +1116,11 @@ export default function App() {
                 disabled={!canGenerateAccessoires}
                 onClick={handleGenerateAccessories}
               >
-                {loading ? 'Composition…' : 'Composer 3 variantes'}
+                {loading
+                  ? accAnalyzing
+                    ? 'Analyse Vision de l’accessoire…'
+                    : 'Composition…'
+                  : 'Composer 3 variantes'}
               </button>
               {error && <div className="error-msg">{error}</div>}
               {!accStartImage && <p className="hint">Importez l&apos;image de départ (étape 1).</p>}
@@ -1116,7 +1141,9 @@ export default function App() {
               <div className="spinner" />
               <p>
                 {activeTab === 'accessoires'
-                  ? `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (Azure GPT image medium), soit ~2-3 min au total. Upscale Magnific x4 dispo après sélection.' : '10-30 secondes.'}`
+                  ? accAnalyzing
+                    ? `Analyse Vision de l’accessoire en cours… (~5-15s) — l’IA décrit matériau, couleur et dimensions réelles pour cadrer le rendu.`
+                    : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (Azure GPT image medium), soit ~2-3 min au total. Upscale Magnific x4 dispo après sélection.' : '10-30 secondes.'}`
                   : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '2-4 min par variante (séquentiel Azure GPT image).' : '10-30 secondes.'}`}
               </p>
             </div>
