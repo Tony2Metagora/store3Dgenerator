@@ -65,6 +65,48 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   }
 }
 
+/**
+ * Wrap fetchWithTimeout avec retry automatique sur 429 (rate limit / EngineOverloaded)
+ * et 503 (service indisponible).
+ *
+ * Stratégie alignée avec la doc Azure OpenAI :
+ *  - Respecte le header `Retry-After` (en secondes) quand fourni par Azure
+ *  - Sinon backoff exponentiel : 5s, 10s, 20s (cap 30s)
+ *  - 3 retries max (4 tentatives au total)
+ *
+ * Le `buildInit` est une factory car le body (FormData, JSON string) est consommé
+ * par chaque fetch ; il doit être re-créé à chaque tentative.
+ *
+ * Distinction critique : `EngineOverloaded` (HTTP 429, code EngineOverloaded) =
+ * capacité backend saturée à l'instant T ≠ rate-limit pur (10 req/min). Les deux
+ * remontent en 429 mais EngineOverloaded peut survenir même sur la 1ère requête
+ * de la minute — d'où l'intérêt critique du retry transparent.
+ */
+async function postWithRetry429(url: string, buildInit: () => RequestInit): Promise<Response> {
+  const MAX_RETRIES = 3;
+  const opLabel = url.match(/\/images\/(\w+)/)?.[1] || 'fetch';
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetchWithTimeout(url, buildInit());
+    if (res.status !== 429 && res.status !== 503) return res;
+    if (attempt === MAX_RETRIES) {
+      console.warn(`[Azure ${opLabel}] ${res.status} après ${MAX_RETRIES} retries — abandon`);
+      return res;
+    }
+    const retryAfterRaw = res.headers.get('Retry-After') || res.headers.get('retry-after') || '';
+    const retryAfterSec = parseInt(retryAfterRaw, 10);
+    const backoffMs = Math.min(30_000, 5_000 * Math.pow(2, attempt));
+    const delayMs =
+      Number.isFinite(retryAfterSec) && retryAfterSec > 0
+        ? Math.min(retryAfterSec * 1000, 60_000)
+        : backoffMs;
+    console.warn(
+      `[Azure ${opLabel}] ${res.status} (try ${attempt + 1}/${MAX_RETRIES + 1}) — retry dans ${Math.round(delayMs / 1000)}s${retryAfterRaw ? ` (Retry-After=${retryAfterRaw})` : ' (backoff exp.)'}`
+    );
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error('postWithRetry429: boucle invalide');
+}
+
 function dataUrlToBlob(dataUrl: string): { blob: Blob; ext: string } {
   const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/s);
   if (!match) throw new Error("Format d'image invalide.");
@@ -147,10 +189,21 @@ function explainAzureError(status: number, body: string, code?: string): string 
     );
   }
   if (status === 429) {
-    return (
-      'Rate limit Azure OpenAI atteint (généralement 10 req/min sur tier standard). ' +
-      'Attendez 60s avant de relancer, ou demandez à Azure d\'augmenter le quota de votre déploiement gpt-image-2.'
-    );
+    const isOverloaded = lower.includes('engineoverloaded') || lower.includes('overloaded');
+    return isOverloaded
+      ? (
+        'Azure OpenAI gpt-image-2 surchargé (EngineOverloaded) — la capacité backend est saturée à l\'instant. ' +
+        'L\'app a retenté 3 fois automatiquement avec backoff exponentiel (5s, 10s, 20s) sans succès. ' +
+        'Solutions : ' +
+        '(1) attendre 1-2 min et relancer ; ' +
+        '(2) basculer temporairement sur Nano Banana (Gemini) le temps que la capacité Azure se libère ; ' +
+        '(3) si le problème persiste, vérifier le statut Azure OpenAI dans le portail.'
+      )
+      : (
+        'Rate limit Azure OpenAI atteint (généralement 10 req/min sur tier standard). ' +
+        'L\'app a retenté 3 fois automatiquement sans succès. ' +
+        'Attendez 60s avant de relancer, ou demandez à Azure d\'augmenter le quota de votre déploiement gpt-image-2.'
+      );
   }
   if (status === 400 && lower.includes('size')) {
     return `Taille d'image non supportée par Azure (${body}). gpt-image-1/2 accepte uniquement 1024x1024, 1024x1536 ou 1536x1024.`;
@@ -228,12 +281,13 @@ async function callImagesEdits(images: string[], prompt: string): Promise<string
     return fd;
   };
 
-  let response = await fetchWithTimeout(primaryUrl, {
+  const buildInit = (): RequestInit => ({
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}` },
     body: buildFormData(),
   });
 
+  let response = await postWithRetry429(primaryUrl, buildInit);
   let urlUsed = primaryUrl;
 
   // Retry avec api-version preview si 404 — gpt-image-2 ne supporte pas
@@ -244,11 +298,7 @@ async function callImagesEdits(images: string[], prompt: string): Promise<string
       `[Azure /edits] 404 avec api-version utilisateur, retry avec ${FALLBACK_API_VERSION}`,
       { primaryUrl, fallbackUrl }
     );
-    response = await fetchWithTimeout(fallbackUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-      body: buildFormData(),
-    });
+    response = await postWithRetry429(fallbackUrl, buildInit);
     urlUsed = fallbackUrl;
   }
 
@@ -275,7 +325,9 @@ async function callImagesGenerations(prompt: string): Promise<string> {
     'Content-Type': 'application/json',
   };
 
-  let response = await fetchWithTimeout(primaryUrl, { method: 'POST', headers, body });
+  const buildInit = (): RequestInit => ({ method: 'POST', headers, body });
+
+  let response = await postWithRetry429(primaryUrl, buildInit);
   let urlUsed = primaryUrl;
 
   // Même retry preview pour /generations au cas où.
@@ -285,7 +337,7 @@ async function callImagesGenerations(prompt: string): Promise<string> {
       `[Azure /generations] 404 avec api-version utilisateur, retry avec ${FALLBACK_API_VERSION}`,
       { primaryUrl, fallbackUrl }
     );
-    response = await fetchWithTimeout(fallbackUrl, { method: 'POST', headers, body });
+    response = await postWithRetry429(fallbackUrl, buildInit);
     urlUsed = fallbackUrl;
   }
 
