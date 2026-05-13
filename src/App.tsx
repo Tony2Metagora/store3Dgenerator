@@ -16,9 +16,11 @@ import {
   generateMouleFromPrompt,
   setApiConfig,
   setEditEndpoint,
+  setUpscaleWorkerUrl,
   editImageWithGemini,
   refineImageQuality,
   resizeToTargetHeight,
+  upscaleWithMagnific,
   getImageSize,
   TARGET_WIDTH,
   TARGET_HEIGHT,
@@ -126,6 +128,10 @@ export default function App() {
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent'
   );
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('nb_apikey') || '');
+  const [upscaleWorkerUrlState, setUpscaleWorkerUrlState] = useState<string>(
+    () => localStorage.getItem('nb_upscale_url') || ''
+  );
+  const [upscaling, setUpscaling] = useState(false);
   const [azureEndpoint, setAzureEndpoint] = useState<string>(
     () => localStorage.getItem('azure_endpoint') || ''
   );
@@ -163,10 +169,11 @@ export default function App() {
     })();
   }, []);
 
-  // Cleanup legacy localStorage keys (upscale Cloudflare Worker, removed)
+  // Persist URL du worker d'upscale Magnific (Cloudflare).
   useEffect(() => {
-    localStorage.removeItem('nb_upscale_url');
-  }, []);
+    localStorage.setItem('nb_upscale_url', upscaleWorkerUrlState);
+    setUpscaleWorkerUrl(upscaleWorkerUrlState);
+  }, [upscaleWorkerUrlState]);
 
   // Persist & sync API config (les 2 jeux de credentials persistent en parallèle)
   useEffect(() => {
@@ -516,6 +523,26 @@ export default function App() {
     }
   };
 
+  const handleUpscale = async () => {
+    if (!activeImage || selectedVariant === null) return;
+    if (!upscaleWorkerUrlState) {
+      setResultError("URL du worker d'upscale non configurée — renseigne-la dans Paramètres API.");
+      return;
+    }
+    setUpscaling(true);
+    setResultError(null);
+    try {
+      const upscaled = await upscaleWithMagnific(activeImage, { scale: 4 });
+      setVariants((prev) => prev.map((v, i) => (i === selectedVariant ? upscaled : v)));
+      setAltSize(null);
+    } catch (err: unknown) {
+      console.error('[handleUpscale] échec :', err);
+      setResultError(err instanceof Error ? err.message : "Erreur lors de l'upscale Magnific.");
+    } finally {
+      setUpscaling(false);
+    }
+  };
+
   const handleAltUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith('image/') || selectedVariant === null) return;
@@ -554,7 +581,7 @@ export default function App() {
     a.click();
   };
 
-  const isBusy = editing || refining || resizing;
+  const isBusy = editing || refining || resizing || upscaling;
   const missingMoules = MOULES.filter((m) => !moulesData[m.id]);
   const activeKey = provider === 'azure' ? azureKey : apiKey;
   const canGenerateBoutique = !!selectedMouleData && !!brandImage && !!activeKey && !loading;
@@ -672,6 +699,21 @@ export default function App() {
                 </div>
               </>
             )}
+
+            <div className="field" style={{ marginTop: '0.75rem', borderTop: '1px dashed var(--border)', paddingTop: '0.75rem' }}>
+              <label htmlFor="upscaleWorkerUrl">URL Worker Upscale (Magnific Illusio via Freepik)</label>
+              <input
+                id="upscaleWorkerUrl"
+                type="url"
+                value={upscaleWorkerUrlState}
+                onChange={(e) => setUpscaleWorkerUrlState(e.target.value)}
+                placeholder="https://upscale-worker.<ton-sous-domaine>.workers.dev"
+              />
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                URL du Cloudflare Worker déployé qui appelle l&apos;API Freepik Magnific Illusio.
+                Une fois renseignée, le bouton <strong>🔍 Upscale Magnific x4</strong> apparaît sur chaque image générée.
+              </p>
+            </div>
 
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               Sauvegardé localement dans votre navigateur.
@@ -1181,6 +1223,14 @@ export default function App() {
                   <div className="result-actions" style={{ marginTop: '1rem' }}>
                     <button className="btn-action btn-refine" onClick={handleRefine} disabled={isBusy}>
                       {refining ? '⏳ Raffinement…' : '✨ Améliorer qualité'}
+                    </button>
+                    <button
+                      className="btn-action btn-upscale"
+                      onClick={handleUpscale}
+                      disabled={isBusy || !upscaleWorkerUrlState}
+                      title={upscaleWorkerUrlState ? 'Upscale x4 via Magnific Illusio (30s-2min)' : "Configure d'abord l'URL du worker dans les paramètres API"}
+                    >
+                      {upscaling ? '⏳ Upscale…' : '🔍 Upscale Magnific x4'}
                     </button>
                     <button className="btn-action btn-download-action" onClick={handleDownload} disabled={isBusy}>
                       💾 Télécharger

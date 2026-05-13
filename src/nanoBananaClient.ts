@@ -1,6 +1,7 @@
 let runtimeEndpoint = '';
 let runtimeApiKey = '';
 let runtimeEditEndpoint = '';
+let runtimeUpscaleWorkerUrl = '';
 
 export function setApiConfig(endpoint: string, apiKey: string) {
   runtimeEndpoint = endpoint;
@@ -9,6 +10,10 @@ export function setApiConfig(endpoint: string, apiKey: string) {
 
 export function setEditEndpoint(url: string) {
   runtimeEditEndpoint = url;
+}
+
+export function setUpscaleWorkerUrl(url: string) {
+  runtimeUpscaleWorkerUrl = url.replace(/\/$/, '');
 }
 
 function getEndpoint() {
@@ -268,6 +273,52 @@ STRICTLY PRESERVE: exact composition, exact camera angle, exact perspective, exa
 IMPROVE ONLY: sharpness, fine texture detail on materials (wood grain, fabric weave, metal reflections, glass transparency), product edge definition, realistic micro-shadows, natural light falloff, subtle surface imperfections typical of a real high-end retail photograph.
 
 Output a photorealistic ultra-sharp 4K landscape photograph, 16:9 ratio, as if shot with a 35 mm full-frame camera at f/5.6, crisp focus throughout the scene.`;
+
+/**
+ * Upscale via Magnific Illusio (Cloudflare Worker proxy → Freepik API).
+ * Async : POST /  → { id }, puis polling GET /status?id=… jusqu'à
+ * `succeeded` (typiquement 30s–2min). Retourne le dataUrl upscalé.
+ */
+export async function upscaleWithMagnific(
+  imageDataUrl: string,
+  opts: { scale?: 2 | 4 | 8; creativity?: number; resemblance?: number } = {}
+): Promise<string> {
+  const base = runtimeUpscaleWorkerUrl;
+  if (!base) throw new Error("URL du worker d'upscale non configurée (settings API → Worker URL).");
+  if (!imageDataUrl.startsWith('data:image/')) throw new Error('Image invalide (data URL attendue).');
+
+  // 1. Création du job
+  const createRes = await fetch(base + '/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image: imageDataUrl,
+      scale: opts.scale ?? 4,
+      creativity: opts.creativity,
+      resemblance: opts.resemblance,
+    }),
+  });
+  if (!createRes.ok) {
+    const err = await createRes.text().catch(() => '');
+    throw new Error(`Upscale (create) HTTP ${createRes.status}: ${err.slice(0, 200)}`);
+  }
+  const created = await createRes.json() as { id?: string; error?: string };
+  if (!created.id) throw new Error(created.error || 'Upscale: pas de task_id retourné');
+
+  // 2. Polling (max ~3min)
+  const maxAttempts = 36; // 36 × 5s = 180s
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const pollRes = await fetch(base + '/status?id=' + encodeURIComponent(created.id));
+    if (!pollRes.ok) continue; // transient — on retry
+    const data = await pollRes.json() as { status?: string; image?: string; error?: string };
+    const status = String(data.status || '').toLowerCase();
+    if (status === 'succeeded' && data.image) return data.image;
+    if (status === 'failed') throw new Error('Upscale échoué : ' + (data.error || 'erreur inconnue'));
+    // sinon : in_progress / created / processing → on continue
+  }
+  throw new Error('Upscale: timeout (>3min) — réessaie ou vérifie la quota Freepik.');
+}
 
 export async function refineImageQuality(imageDataUrl: string): Promise<string> {
   const EDIT_ENDPOINT = getEditEndpoint();
