@@ -1,55 +1,58 @@
-# Store 3D Generator — Metagora × Nano Banana
+# Store 3D Generator — Metagora
 
-Outil en ligne pour transformer une image de boutique « moule Metagora » en univers de marque via l'API Nano Banana.
+Outil de génération d'univers de boutique en image, avatar dans une boutique, et déclinaison d'accessoires depuis un produit source. Deux providers IA supportés :
+
+- **Gemini 2.5 Flash Image** (Google `generativelanguage` API)
+- **Azure OpenAI gpt-image-2** (provider par défaut)
+
+Plus upscaling **Magnific Illusio** (Freepik API) en post-traitement optionnel sur chaque image générée.
 
 ## Démarrage rapide
 
 ```bash
-# 1. Installer les dépendances
 npm install
-
-# 2. Copier le fichier d'environnement et renseigner vos clés
-cp .env.example .env
-# Éditer .env → mettre votre endpoint et clé API Nano Banana
-
-# 3. Lancer le serveur de développement
 npm run dev
 ```
 
-## Configuration
+Les clés API sont saisies directement dans l'interface (champ **Paramètres API**) et persistées en `localStorage`. Aucun `.env` requis pour un usage local — utile uniquement si tu veux pré-remplir l'endpoint Gemini par défaut.
 
-| Variable | Description |
+| Clé localStorage | Description |
 |---|---|
-| `VITE_NANOBANANA_ENDPOINT` | URL de l'API Nano Banana |
-| `VITE_NANOBANANA_API_KEY` | Clé API Nano Banana |
+| `img_provider` | `gemini` ou `azure` |
+| `nb_endpoint`, `nb_edit_endpoint`, `nb_apikey` | Endpoints + clé Gemini |
+| `azure_endpoint`, `azure_apikey` | Endpoint + clé Azure OpenAI |
+| `freepik_api_key` | Clé Freepik (Magnific Illusio upscale) |
+
+## Workflows
+
+- **Fond de boutique** : moule × image marque × prompt → 3 variantes 3656×2056 (16:9).
+- **Avatar dans boutique** : avatar × fond × prompt → 3 variantes.
+- **Accessoires** : déclinaison d'un produit source en bijou, foulard, sac, ceinture (étape par étape).
+
+Post-traitement sur chaque variante validée :
+- ✏️ Modifier (edit prompt libre)
+- ✨ Améliorer qualité (re-render contrôle composition)
+- 🔍 **Upscale Magnific x4** (Freepik API, ~30s-2min)
+- 💾 Télécharger / 📤 Remplacer (upload alternative)
 
 ## Déploiement GitHub Pages
 
-Le déploiement est automatique via GitHub Actions à chaque push sur `main`.
+```bash
+npm run deploy
+```
 
-**Note :** Les variables d'environnement (clé API) ne sont **pas** incluses dans le build GitHub Pages par défaut. Pour un usage en production, vous pouvez :
-- Ajouter les secrets dans **Settings > Secrets > Actions** de votre repo GitHub
-- Ou saisir la clé API directement dans l'interface (champ prévu à cet effet)
+Build Vite + push `dist/` sur la branche `gh-pages` via `gh-pages`. URL prod : `tony2metagora.github.io/store3Dgenerator/`.
 
-## Arborescence
+## Arborescence src/
 
 ```
-store3Dgenerator/
-├── index.html
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── .env.example
-├── .gitignore
-├── .github/workflows/deploy.yml
-├── public/
-│   └── favicon.svg
-└── src/
-    ├── main.tsx
-    ├── App.tsx
-    ├── brands.ts
-    ├── nanoBananaClient.ts
-    ├── types.ts
-    ├── styles.css
-    └── vite-env.d.ts
+src/
+├── main.tsx                 # entry Vite
+├── App.tsx                  # UI principale (tabs, settings, preview)
+├── brands.ts                # prompts builders (boutique, avatar, accessoires)
+├── moules.ts                # catalogue des moules (bijouterie, etc.)
+├── moulesStore.ts           # IndexedDB store des moules générés
+├── nanoBananaClient.ts      # API Gemini + post-process (fit 16:9, upscale Magnific)
+├── openaiImageClient.ts     # API Azure OpenAI gpt-image-2
+└── styles.css
 ```

@@ -158,10 +158,6 @@ export default function App() {
     setFreepikApiKey(freepikApiKeyState);
   }, [freepikApiKeyState]);
 
-  // Migration : si l'ancienne clé localStorage 'nb_upscale_url' existait, on la
-  // purge (legacy worker — bypass désormais direct via API Freepik).
-  useEffect(() => { localStorage.removeItem('nb_upscale_url'); }, []);
-
   // Persist & sync API config (les 2 jeux de credentials persistent en parallèle)
   useEffect(() => {
     localStorage.setItem('img_provider', provider);

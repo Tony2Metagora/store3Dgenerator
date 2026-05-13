@@ -114,11 +114,6 @@ export async function getImageSize(dataUrl: string): Promise<{ width: number; he
   return { width: img.width, height: img.height };
 }
 
-export async function getImageHeight(dataUrl: string): Promise<number> {
-  const img = await loadImage(dataUrl);
-  return img.height;
-}
-
 function parseDataUrl(dataUrl: string): { mimeType: string; data: string } {
   const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/s);
   if (!match) throw new Error('Format d\'image invalide.');

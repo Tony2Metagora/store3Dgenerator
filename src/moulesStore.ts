@@ -44,16 +44,6 @@ export async function loadMoule(id: string): Promise<string | null> {
   });
 }
 
-export async function deleteMoule(id: string): Promise<void> {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
 export async function listMouleIds(): Promise<string[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
