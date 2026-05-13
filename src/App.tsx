@@ -92,6 +92,7 @@ export default function App() {
   const [accNames, setAccNames] = useState<Record<AccessoryCategory, string>>(EMPTY_ACCESSORY_NAMES);
   const [accDragging, setAccDragging] = useState<AccessoryCategory | null>(null);
   const [accGeneratingStep, setAccGeneratingStep] = useState<AccessoryCategory | null>(null);
+  const [accExtraInstruction, setAccExtraInstruction] = useState<string>('');
 
   // Preview variants
   const [variants, setVariants] = useState<string[]>([]);
@@ -421,7 +422,7 @@ export default function App() {
         if (!accImg) continue;
         setAccGeneratingStep(acc.id);
         console.log(`[Accessoires] ${i + 1}/${queue.length} — ajout ${acc.label}…`);
-        const next = await callApi(current, accImg, buildAccessoryPrompt(acc));
+        const next = await callApi(current, accImg, buildAccessoryPrompt(acc, accExtraInstruction));
         current = next;
         steps.push(next);
         badges.push(`${acc.emoji} ${acc.label}`);
@@ -1045,6 +1046,22 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
+
+              <div className="field" style={{ marginTop: '1rem' }}>
+                <label htmlFor="accExtraInstruction">
+                  Instruction complémentaire pour l&apos;IA (optionnel)
+                </label>
+                <textarea
+                  id="accExtraInstruction"
+                  value={accExtraInstruction}
+                  onChange={(e) => setAccExtraInstruction(e.target.value)}
+                  placeholder="Ex. : le sac est porté à la main droite ; le foulard est noué en pointe sur le devant ; éviter de masquer le bijou avec le foulard…"
+                  rows={3}
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                  Ce texte est injecté comme consigne prioritaire dans le prompt de chaque étape d&apos;ajout d&apos;accessoire. Laissez vide si vous n&apos;avez pas de précision particulière.
+                </p>
               </div>
             </div>
 

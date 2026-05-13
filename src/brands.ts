@@ -116,22 +116,33 @@ export function getAccessoryDef(id: AccessoryCategory): AccessoryDef | undefined
  * Prompt pour ajouter UN accessoire sur une image existante.
  *
  * Deux images sont fournies dans cet ordre :
- *  1. Image de départ (avatar + boutique, déjà composée)
+ *  1. Image de départ (avatar + boutique, potentiellement avec d'autres
+ *     accessoires déjà ajoutés à des étapes précédentes)
  *  2. Image de l'accessoire à ajouter
  *
- * L'opération doit préserver TOUT sauf l'ajout ciblé de l'accessoire.
+ * Règle clé : les accessoires sont CUMULATIFS (les accessoires déjà présents
+ * sur l'image 1 doivent être conservés en plus du nouvel accessoire ajouté).
+ *
+ * @param accessory  Définition de l'accessoire à ajouter
+ * @param extra      Instruction libre complémentaire saisie par l'utilisateur
+ *                   (placement précis, main, posture, etc.) — vide si non utilisée
  */
-export function buildAccessoryPrompt(accessory: AccessoryDef): string {
-  return `Ajoute l'accessoire de l'image 2 (${accessory.itemDescription}) sur le personnage présent dans l'image 1, en respectant strictement le modèle de l'accessoire.
+export function buildAccessoryPrompt(accessory: AccessoryDef, extra?: string): string {
+  const extraBlock = (extra || '').trim()
+    ? `\nINSTRUCTION COMPLÉMENTAIRE UTILISATEUR (priorité haute, à respecter en plus des consignes ci-dessus) :\n${extra!.trim()}\n`
+    : '';
+
+  return `Ajoute l'accessoire de l'image 2 (${accessory.itemDescription}) sur le personnage présent dans l'image 1, en respectant strictement le modèle de l'accessoire. L'accessoire de l'image 2 DOIT être clairement visible dans l'image finale.
 
 CONSIGNES STRICTES :
-1. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la tenue et la pose du personnage de l'image 1. Le personnage doit rester identique au pixel près partout sauf à l'endroit où l'accessoire est ajouté.
-2. Préserve EXACTEMENT l'arrière-plan, l'architecture, l'éclairage, les vitrines, les produits, le sol et la perspective de l'image 1. Rien d'autre que le personnage ne doit changer.
-3. Place l'accessoire ${accessory.bodyZone}. L'accessoire doit reprendre fidèlement la forme, la couleur, les matériaux, les détails et le style exact de l'image 2 (mêmes finitions, mêmes motifs, mêmes proportions).
-4. Lumière et ombres cohérentes avec la scène : l'accessoire doit recevoir la même direction de lumière que le personnage et projeter des ombres réalistes sur le vêtement / la peau, sans effet "collage" ni "détourage".
-5. Échelle réaliste : l'accessoire doit avoir une taille crédible par rapport au personnage et au cadre, ni trop grand ni trop petit.
+1. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la tenue, la pose ET TOUS LES ACCESSOIRES DÉJÀ PRÉSENTS sur le personnage de l'image 1 (foulard, bijou, sac, ceinture, lunettes, chapeau, etc. déjà visibles doivent rester en place et visibles). Les accessoires sont CUMULATIFS — n'enlève ni ne remplace aucun élément existant.
+2. Préserve EXACTEMENT l'arrière-plan, l'architecture, l'éclairage, les vitrines, les produits, le sol et la perspective de l'image 1. Rien d'autre que l'ajout de l'accessoire ne doit changer.
+3. Place le nouvel accessoire ${accessory.bodyZone}. L'accessoire doit reprendre fidèlement la forme, la couleur, les matériaux, les détails et le style exact de l'image 2 (mêmes finitions, mêmes motifs, mêmes proportions).
+4. L'accessoire de l'image 2 DOIT apparaître dans le résultat — c'est l'objectif principal de l'opération. Si l'accessoire entre en conflit visuel avec un accessoire déjà présent, ajuste légèrement son placement pour qu'il reste visible (ex : ceinture par-dessus une chemise déjà nouée à la taille), mais ne supprime jamais l'accessoire existant.
+5. Lumière et ombres cohérentes avec la scène : l'accessoire reçoit la même direction de lumière que le personnage et projette des ombres réalistes, sans effet "collage" ni "détourage".
+6. Échelle réaliste : l'accessoire a une taille crédible par rapport au personnage et au cadre.
+${extraBlock}
+STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm, lumière naturelle douce, format 16:9 paysage. Le rendu final doit être indiscernable d'une photo réelle du personnage portant l'accessoire (et tous ceux déjà présents).
 
-STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm, lumière naturelle douce, format 16:9 paysage. Le rendu final doit être indiscernable d'une photo réelle du personnage portant l'accessoire.
-
-À ÉVITER : modifier le visage / la pose / les vêtements existants, dupliquer ou multiplier l'accessoire, mauvaise échelle, mauvaise position anatomique, ombres incohérentes, effet découpe-collage, style cartoon, watermark, texte illisible, modification du décor.`;
+À ÉVITER : supprimer ou remplacer un accessoire déjà présent sur le personnage, oublier d'ajouter l'accessoire de l'image 2, modifier le visage / la pose / les vêtements existants, dupliquer ou multiplier l'accessoire, mauvaise échelle, mauvaise position anatomique, ombres incohérentes, effet découpe-collage, style cartoon, watermark, texte illisible, modification du décor.`;
 }
