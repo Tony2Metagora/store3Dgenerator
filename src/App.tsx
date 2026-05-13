@@ -1145,8 +1145,8 @@ export default function App() {
               <div className="spinner" />
               <p>
                 {activeTab === 'accessoires'
-                  ? `Composition de ${accessoryQueue.length} accessoire${accessoryQueue.length > 1 ? 's' : ''} en séquence… 30-90s par étape.`
-                  : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (séquentiel Azure).' : '10-30 secondes.'}`}
+                  ? `Composition de ${accessoryQueue.length} accessoire${accessoryQueue.length > 1 ? 's' : ''} en séquence… ${provider === 'azure' ? '2-4 min par étape (GPT image quality=high).' : '30-90s par étape.'}`
+                  : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '2-4 min par variante (séquentiel Azure GPT image).' : '10-30 secondes.'}`}
               </p>
             </div>
           ) : variants.length > 0 ? (
