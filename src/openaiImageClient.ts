@@ -120,18 +120,85 @@ function ensureCreds(): { rawEndpoint: string; apiKey: string } {
   return { rawEndpoint, apiKey };
 }
 
+/**
+ * Mappe un code d'erreur / un body Azure brut vers un message utilisateur clair.
+ * Couvre les cas vus en prod : modération, rate limit, taille image, version
+ * d'API, content filter sur le prompt.
+ */
+function explainAzureError(status: number, body: string, code?: string): string {
+  const lower = (body + ' ' + (code || '')).toLowerCase();
+
+  // Content moderation — le plus fréquent sur /images/edits avec un portrait
+  // réaliste (Azure ajoute des contrôles supplémentaires par rapport à /generations).
+  if (
+    status === 400 &&
+    (lower.includes('moderation_blocked') ||
+      lower.includes('content_policy') ||
+      lower.includes('safety') ||
+      lower.includes('content_filter'))
+  ) {
+    return (
+      'Image refusée par le filtre de modération Azure OpenAI. ' +
+      'Cause la plus courante : gpt-image-1/2 bloque automatiquement toute image identifiée comme portrait réaliste d\'une personne réelle (le filtre ne peut pas distinguer un avatar IA d\'une vraie photo). ' +
+      'Solutions : ' +
+      '(1) basculer sur Nano Banana (Gemini) pour le tab Accessoires — pas de filtre portrait ; ' +
+      '(2) utiliser une image de départ avec un personnage moins photoréaliste (style 3D / cartoon) ; ' +
+      '(3) reformuler l\'instruction complémentaire pour rester très neutre.'
+    );
+  }
+  if (status === 429) {
+    return (
+      'Rate limit Azure OpenAI atteint (généralement 10 req/min sur tier standard). ' +
+      'Attendez 60s avant de relancer, ou demandez à Azure d\'augmenter le quota de votre déploiement gpt-image-2.'
+    );
+  }
+  if (status === 400 && lower.includes('size')) {
+    return `Taille d'image non supportée par Azure (${body}). gpt-image-1/2 accepte uniquement 1024x1024, 1024x1536 ou 1536x1024.`;
+  }
+  if (status === 400 && lower.includes('extra_body')) {
+    return `Erreur de schéma Azure (champ extra_body injecté). Mettez à jour votre client ou retirez les paramètres non-standard.`;
+  }
+  if (status === 404) {
+    return `Endpoint non trouvé (404). L'api-version est peut-être trop ancienne — l'app retente automatiquement avec 2025-04-01-preview. Si l'erreur persiste, vérifiez le nom du déploiement dans l'URL.`;
+  }
+  if (status === 401 || status === 403) {
+    return `Authentification refusée (${status}). Vérifiez votre clé Azure OpenAI dans les paramètres API.`;
+  }
+  // Fallback : message brut
+  return `Erreur Azure OpenAI (${status}) : ${body || 'réponse vide'}`;
+}
+
 async function parseImageResponse(response: Response, urlForErr: string): Promise<string> {
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new Error(`Erreur Azure OpenAI (${response.status}) : ${text || response.statusText} — URL appelée : ${urlForErr}`);
+    // Tente de parser le body comme JSON pour extraire un code d'erreur structuré.
+    let errCode: string | undefined;
+    try {
+      const parsed = JSON.parse(text) as { error?: { code?: string } };
+      errCode = parsed.error?.code;
+    } catch {
+      // body non-JSON, on garde text brut
+    }
+    console.error(`[Azure parseImageResponse] HTTP ${response.status} — body :`, text);
+    const friendly = explainAzureError(response.status, text, errCode);
+    throw new Error(`${friendly} — URL : ${urlForErr}`);
   }
   const json = await response.json() as AzureImageResponse;
   if (json.error) {
-    throw new Error(`Erreur Azure OpenAI : ${json.error.message || json.error.code || 'inconnue'} — URL appelée : ${urlForErr}`);
+    console.error('[Azure parseImageResponse] body.error :', json.error);
+    const friendly = explainAzureError(
+      200,
+      json.error.message || '',
+      json.error.code
+    );
+    throw new Error(`${friendly} — URL : ${urlForErr}`);
   }
   const item = json.data?.[0];
   if (!item?.b64_json) {
-    throw new Error("Aucune image dans la réponse Azure OpenAI.");
+    console.error('[Azure parseImageResponse] data manquant :', json);
+    throw new Error(
+      `Aucune image dans la réponse Azure OpenAI. La requête a réussi (HTTP 200) mais data[0].b64_json est absent. Voir console F12 pour le payload exact.`
+    );
   }
   return `data:image/png;base64,${item.b64_json}`;
 }

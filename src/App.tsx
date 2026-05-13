@@ -1253,9 +1253,18 @@ export default function App() {
                 </>
               )}
             </>
+          ) : error ? (
+            <div className="error-msg" style={{ marginTop: 0, padding: '1rem', fontSize: '0.9rem', lineHeight: 1.5 }}>
+              <strong style={{ display: 'block', marginBottom: '0.4rem' }}>
+                ❌ La génération a échoué
+              </strong>
+              {error}
+            </div>
           ) : (
             <div className="preview-placeholder">
-              Les {PREVIEW_COUNT} variantes apparaîtront ici après la génération.
+              {activeTab === 'accessoires'
+                ? 'Le résultat de la composition apparaîtra ici (1 image par accessoire ajouté).'
+                : `Les ${PREVIEW_COUNT} variantes apparaîtront ici après la génération.`}
             </div>
           )}
         </div>
