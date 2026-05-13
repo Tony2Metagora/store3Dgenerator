@@ -256,11 +256,18 @@ async function parseImageResponse(response: Response, urlForErr: string): Promis
   return `data:image/png;base64,${item.b64_json}`;
 }
 
+export type ImageQuality = 'low' | 'medium' | 'high';
+
 /**
  * POST /images/edits — accepte 1 ou plusieurs images en input.
  * Format target : 16:9 paysage (1536x1024) puis fit16x9 final côté front.
+ * `quality` : 'high' (~90-180s, défaut), 'medium' (~30-60s), 'low' (~10-20s).
  */
-async function callImagesEdits(images: string[], prompt: string): Promise<string> {
+async function callImagesEdits(
+  images: string[],
+  prompt: string,
+  quality: ImageQuality = 'high'
+): Promise<string> {
   const { rawEndpoint, apiKey } = ensureCreds();
   const primaryUrl = normalizeAzureUrl(rawEndpoint, 'edits');
 
@@ -273,7 +280,7 @@ async function callImagesEdits(images: string[], prompt: string): Promise<string
     fd.append('prompt', prompt);
     fd.append('n', '1');
     fd.append('size', '1536x1024');
-    fd.append('quality', 'high');
+    fd.append('quality', quality);
     images.forEach((dataUrl, idx) => {
       const { blob, ext } = dataUrlToBlob(dataUrl);
       fd.append(fieldName, blob, `input-${idx}.${ext}`);
@@ -350,9 +357,10 @@ async function callImagesGenerations(prompt: string): Promise<string> {
 export async function callAzureOpenAI(
   modelImage: string,
   brandImage: string,
-  prompt: string
+  prompt: string,
+  quality: ImageQuality = 'high'
 ): Promise<string> {
-  return callImagesEdits([modelImage, brandImage], prompt);
+  return callImagesEdits([modelImage, brandImage], prompt, quality);
 }
 
 /**
@@ -367,14 +375,15 @@ export async function callAzureOpenAIBatch(
   modelImage: string,
   brandImage: string,
   prompt: string,
-  count = 3
+  count = 3,
+  quality: ImageQuality = 'high'
 ): Promise<string[]> {
   const successes: string[] = [];
   const failures: unknown[] = [];
   for (let i = 0; i < count; i++) {
     try {
-      console.log(`[callAzureOpenAIBatch] variante ${i + 1}/${count} en cours…`);
-      const img = await callAzureOpenAI(modelImage, brandImage, prompt);
+      console.log(`[callAzureOpenAIBatch] variante ${i + 1}/${count} en cours (quality=${quality})…`);
+      const img = await callAzureOpenAI(modelImage, brandImage, prompt, quality);
       successes.push(img);
     } catch (err) {
       console.warn(`[callAzureOpenAIBatch] variante ${i + 1}/${count} échouée :`, err);

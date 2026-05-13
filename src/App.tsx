@@ -11,7 +11,6 @@ import {
 import { MOULES, getMouleById, type MouleCategory } from './moules';
 import { loadMoule, saveMoule, listMouleIds } from './moulesStore';
 import {
-  callNanoBanana,
   callNanoBananaBatch,
   generateMouleFromPrompt,
   setApiConfig,
@@ -26,7 +25,6 @@ import {
   TARGET_HEIGHT,
 } from './nanoBananaClient';
 import {
-  callAzureOpenAI,
   callAzureOpenAIBatch,
   generateMouleFromAzure,
   editImageWithAzureOpenAI,
@@ -37,19 +35,6 @@ import './styles.css';
 
 type Provider = 'gemini' | 'azure';
 type Tab = 'boutique' | 'avatar' | 'accessoires';
-
-const EMPTY_ACCESSORY_IMAGES: Record<AccessoryCategory, string | null> = {
-  bijou: null,
-  foulard: null,
-  sac: null,
-  ceinture: null,
-};
-const EMPTY_ACCESSORY_NAMES: Record<AccessoryCategory, string> = {
-  bijou: '',
-  foulard: '',
-  sac: '',
-  ceinture: '',
-};
 
 const PREVIEW_COUNT = 3;
 
@@ -84,16 +69,14 @@ export default function App() {
   const [avatarContext, setAvatarContext] = useState<string>(DEFAULT_AVATAR_CADRAGE);
   const [avatarPrompt, setAvatarPrompt] = useState<string>('');
 
-  // Accessoires inputs (tab Accessoires)
+  // Accessoires inputs (tab Accessoires) — 1 seul accessoire à intégrer parmi les types disponibles
   const [accStartImage, setAccStartImage] = useState<string | null>(null);
   const [accStartName, setAccStartName] = useState<string>('');
   const [accStartDragging, setAccStartDragging] = useState(false);
-  const [accImages, setAccImages] = useState<Record<AccessoryCategory, string | null>>(
-    EMPTY_ACCESSORY_IMAGES
-  );
-  const [accNames, setAccNames] = useState<Record<AccessoryCategory, string>>(EMPTY_ACCESSORY_NAMES);
-  const [accDragging, setAccDragging] = useState<AccessoryCategory | null>(null);
-  const [accGeneratingStep, setAccGeneratingStep] = useState<AccessoryCategory | null>(null);
+  const [accCategory, setAccCategory] = useState<AccessoryCategory>('bijou');
+  const [accImage, setAccImage] = useState<string | null>(null);
+  const [accName, setAccName] = useState<string>('');
+  const [accDragging, setAccDragging] = useState<boolean>(false);
   const [accExtraInstruction, setAccExtraInstruction] = useState<string>('');
 
   // Preview variants
@@ -319,30 +302,27 @@ export default function App() {
     if (file) readAccStartFile(file);
   }, []);
 
-  const readAccSlotFile = (cat: AccessoryCategory, file: File) => {
+  const readAccFile = (file: File) => {
     if (!file.type.startsWith('image/')) return;
+    setAccName(file.name);
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setAccImages((prev) => ({ ...prev, [cat]: reader.result as string }));
-      setAccNames((prev) => ({ ...prev, [cat]: file.name }));
-    };
+    reader.onloadend = () => setAccImage(reader.result as string);
     reader.readAsDataURL(file);
   };
-  const handleAccSlotChange =
-    (cat: AccessoryCategory) => (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) readAccSlotFile(cat, file);
-      e.target.value = '';
-    };
-  const handleAccSlotDrop = (cat: AccessoryCategory) => (e: React.DragEvent) => {
-    e.preventDefault();
-    setAccDragging(null);
-    const file = e.dataTransfer.files?.[0];
-    if (file) readAccSlotFile(cat, file);
+  const handleAccFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) readAccFile(file);
+    e.target.value = '';
   };
-  const clearAccSlot = (cat: AccessoryCategory) => {
-    setAccImages((prev) => ({ ...prev, [cat]: null }));
-    setAccNames((prev) => ({ ...prev, [cat]: '' }));
+  const handleAccDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setAccDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) readAccFile(file);
+  }, []);
+  const clearAccImage = () => {
+    setAccImage(null);
+    setAccName('');
   };
 
   // ─── Génération 3 variantes en parallèle (dispatch selon provider) ───
@@ -400,14 +380,14 @@ export default function App() {
     }
   };
 
-  // ─── Génération séquentielle des accessoires (tab Accessoires) ───
-  // Chaîne les appels API : départ → +bijou → +foulard → +sac → +ceinture.
-  // Seuls les slots remplis sont ajoutés. Chaque étape intermédiaire est
-  // exposée comme "variante" pour comparer, la dernière étant sélectionnée.
+  // ─── Génération 3 variantes accessoire (tab Accessoires) ───
+  // 1 seul accessoire choisi (catégorie + image), 3 variantes en parallèle/séquentiel
+  // selon provider. Azure tourne en quality=medium pour rester sous ~30-60s par variante
+  // (l'utilisateur peut upscaler la variante choisie via Magnific x4 en post).
   const handleGenerateAccessories = async () => {
-    if (!accStartImage) return;
-    const queue = ACCESSORY_DEFS.filter((a) => accImages[a.id]);
-    if (queue.length === 0) return;
+    if (!accStartImage || !accImage) return;
+    const acc = getAccessoryDef(accCategory);
+    if (!acc) return;
 
     setLoading(true);
     setError(null);
@@ -417,43 +397,23 @@ export default function App() {
     setSelectedVariant(null);
     setAltSize(null);
 
-    const callApi =
-      provider === 'azure'
-        ? (current: string, accImg: string, p: string) => callAzureOpenAI(current, accImg, p)
-        : (current: string, accImg: string, p: string) => callNanoBanana(current, accImg, p);
-
-    let current = accStartImage;
-    const steps: string[] = [];
-    const badges: string[] = [];
-
     try {
-      for (let i = 0; i < queue.length; i++) {
-        const acc = queue[i];
-        const accImg = accImages[acc.id];
-        if (!accImg) continue;
-        setAccGeneratingStep(acc.id);
-        console.log(`[Accessoires] ${i + 1}/${queue.length} — ajout ${acc.label}…`);
-        const next = await callApi(current, accImg, buildAccessoryPrompt(acc, accExtraInstruction));
-        current = next;
-        steps.push(next);
-        badges.push(`${acc.emoji} ${acc.label}`);
-        // Mise à jour incrémentale pour que l'utilisateur voie les étapes s'afficher
-        setVariants([...steps]);
-        setVariantBadges([...badges]);
-        setSelectedVariant(steps.length - 1);
+      const prompt = buildAccessoryPrompt(acc, accExtraInstruction);
+      const results = provider === 'azure'
+        ? await callAzureOpenAIBatch(accStartImage, accImage, prompt, PREVIEW_COUNT, 'medium')
+        : await callNanoBananaBatch(accStartImage, accImage, prompt, PREVIEW_COUNT);
+      if (results.length === 0) {
+        setError(
+          `Aucune variante générée. Vérifiez votre ${provider === 'azure' ? 'clé Azure OpenAI' : 'clé Gemini'} et la console F12 pour le détail.`
+        );
+      } else {
+        setVariants(results);
+        setSelectedVariant(0);
       }
     } catch (err: unknown) {
       console.error('[handleGenerateAccessories] échec :', err);
-      const failedAt = badges.length;
-      const total = queue.length;
-      const baseMsg = err instanceof Error ? err.message : 'Erreur inconnue.';
-      setError(
-        steps.length > 0
-          ? `Échec à l'étape ${failedAt + 1}/${total} (${queue[failedAt]?.label ?? '?'}). ${baseMsg} — ${steps.length} étape(s) intermédiaire(s) disponible(s).`
-          : `${baseMsg}`
-      );
+      setError(err instanceof Error ? err.message : 'Erreur inconnue.');
     } finally {
-      setAccGeneratingStep(null);
       setLoading(false);
     }
   };
@@ -590,9 +550,8 @@ export default function App() {
   const activeKey = provider === 'azure' ? azureKey : apiKey;
   const canGenerateBoutique = !!selectedMouleData && !!brandImage && !!activeKey && !loading;
   const canGenerateAvatar = !!avatarImage && !!boutiqueBgImage && !!activeKey && !loading;
-  const accessoryQueue = ACCESSORY_DEFS.filter((a) => accImages[a.id]);
   const canGenerateAccessoires =
-    !!accStartImage && accessoryQueue.length > 0 && !!activeKey && !loading;
+    !!accStartImage && !!accImage && !!activeKey && !loading;
 
   return (
     <div className="app">
@@ -1014,13 +973,13 @@ export default function App() {
             </div>
           </>)}
 
-          {/* TAB ACCESSOIRES — étape 1 image de départ, étape 2 slots accessoires, étape 3 composition séquentielle */}
+          {/* TAB ACCESSOIRES — étape 1 image de départ, étape 2 sélecteur catégorie + image accessoire, étape 3 générer 3 variantes */}
           {activeTab === 'accessoires' && (<>
             {/* Étape 1 — Image de départ */}
             <div className="card">
               <h2><span className="step-num">1</span> Image de départ</h2>
               <p className="hint" style={{ marginBottom: '0.6rem' }}>
-                Photo de la personne sur laquelle on va ajouter les accessoires (en général, une variante de l&apos;onglet « Avatar dans boutique » téléchargée puis ré-importée ici).
+                Photo de la personne sur laquelle on va ajouter l&apos;accessoire (en général, une variante de l&apos;onglet « Avatar dans boutique » téléchargée puis ré-importée ici).
               </p>
               <div
                 className={`upload-zone ${accStartDragging ? 'dragging' : ''}`}
@@ -1039,61 +998,81 @@ export default function App() {
               )}
             </div>
 
-            {/* Étape 2 — Accessoires (4 slots indépendants) */}
+            {/* Étape 2 — Accessoire à intégrer (1 catégorie + 1 image) */}
             <div className="card" style={{ marginTop: '1rem' }}>
-              <h2><span className="step-num">2</span> Accessoires à ajouter</h2>
+              <h2><span className="step-num">2</span> Accessoire à intégrer</h2>
               <p className="hint" style={{ marginBottom: '0.6rem' }}>
-                Importez une image par catégorie souhaitée (ordre d&apos;application : {ACCESSORY_DEFS.map((a) => a.label.toLowerCase()).join(' → ')}). Les slots vides sont ignorés.
+                Choisissez le type d&apos;accessoire, importez son image — 3 variantes seront générées parmi lesquelles choisir.
               </p>
-              <div className="accessoires-grid">
-                {ACCESSORY_DEFS.map((acc) => {
-                  const img = accImages[acc.id];
-                  const name = accNames[acc.id];
-                  const isDragging = accDragging === acc.id;
-                  const isCurrent = accGeneratingStep === acc.id;
-                  return (
-                    <div key={acc.id} className={`accessoire-slot${isCurrent ? ' generating' : ''}`}>
-                      <div className="accessoire-header">
-                        <span className="accessoire-emoji">{acc.emoji}</span>
-                        <strong>{acc.label}</strong>
-                        {img && (
-                          <button
-                            type="button"
-                            className="btn-clear-slot"
-                            onClick={() => clearAccSlot(acc.id)}
-                            title="Retirer cet accessoire"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                      <div
-                        className={`upload-zone compact ${isDragging ? 'dragging' : ''}`}
-                        onDragOver={(e) => { e.preventDefault(); setAccDragging(acc.id); }}
-                        onDragLeave={() => setAccDragging(null)}
-                        onDrop={handleAccSlotDrop(acc.id)}
+
+              <div className="field" style={{ marginBottom: '0.8rem' }}>
+                <label>Type d&apos;accessoire</label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                  {ACCESSORY_DEFS.map((acc) => {
+                    const isSelected = accCategory === acc.id;
+                    return (
+                      <button
+                        key={acc.id}
+                        type="button"
+                        onClick={() => setAccCategory(acc.id)}
+                        style={{
+                          padding: '0.55rem 1rem',
+                          border: isSelected ? '2px solid #e41e45' : '1px solid #d4d4d8',
+                          background: isSelected ? 'rgba(228, 30, 69, 0.08)' : '#fff',
+                          color: isSelected ? '#e41e45' : '#27272a',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: isSelected ? 600 : 500,
+                          fontSize: '0.95rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          transition: 'all 0.15s',
+                        }}
                       >
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          onChange={handleAccSlotChange(acc.id)}
-                        />
-                        {img ? (
-                          <>
-                            <img src={img} alt={name} className="accessoire-thumb" />
-                            <p className="accessoire-filename">{name}</p>
-                          </>
-                        ) : (
-                          <>
-                            <div className="icon" style={{ fontSize: '1.4rem' }}>📤</div>
-                            <p style={{ fontSize: '0.78rem' }}>Importer une image</p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                        <span>{acc.emoji}</span>
+                        {acc.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+
+              <div
+                className={`upload-zone ${accDragging ? 'dragging' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setAccDragging(true); }}
+                onDragLeave={() => setAccDragging(false)}
+                onDrop={handleAccDrop}
+              >
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAccFileChange} />
+                <div className="icon">📤</div>
+                <p>Glissez-déposez ou cliquez pour importer<br />l&apos;image de l&apos;accessoire (JPEG / PNG / WebP)</p>
+              </div>
+              {accImage && (
+                <div className="upload-preview" style={{ position: 'relative' }}>
+                  <img src={accImage} alt={accName} />
+                  <button
+                    type="button"
+                    onClick={clearAccImage}
+                    title="Retirer cette image"
+                    style={{
+                      position: 'absolute',
+                      top: '0.4rem',
+                      right: '0.4rem',
+                      background: 'rgba(0,0,0,0.6)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: '1.6rem',
+                      height: '1.6rem',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
 
               <div className="field" style={{ marginTop: '1rem' }}>
                 <label htmlFor="accExtraInstruction">
@@ -1103,33 +1082,29 @@ export default function App() {
                   id="accExtraInstruction"
                   value={accExtraInstruction}
                   onChange={(e) => setAccExtraInstruction(e.target.value)}
-                  placeholder="Ex. : le sac est porté à la main droite ; le foulard est noué en pointe sur le devant ; éviter de masquer le bijou avec le foulard…"
+                  placeholder="Ex. : le sac est porté à la main droite ; le foulard est noué en pointe sur le devant…"
                   rows={3}
                 />
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
-                  Ce texte est injecté comme consigne prioritaire dans le prompt de chaque étape d&apos;ajout d&apos;accessoire. Laissez vide si vous n&apos;avez pas de précision particulière.
+                  Ce texte est injecté comme consigne prioritaire dans le prompt. Laissez vide si rien à préciser.
                 </p>
               </div>
             </div>
 
             {/* Étape 3 — Composer */}
             <div className="card" style={{ marginTop: '1rem' }}>
-              <h2><span className="step-num">3</span> Composer ({accessoryQueue.length} étape{accessoryQueue.length > 1 ? 's' : ''})</h2>
+              <h2><span className="step-num">3</span> Composer (3 variantes)</h2>
               <button
                 className="btn-generate"
                 disabled={!canGenerateAccessoires}
                 onClick={handleGenerateAccessories}
               >
-                {loading
-                  ? accGeneratingStep
-                    ? `Ajout ${getAccessoryDef(accGeneratingStep)?.label}…`
-                    : 'Composition…'
-                  : `Composer (${accessoryQueue.length} accessoire${accessoryQueue.length > 1 ? 's' : ''})`}
+                {loading ? 'Composition…' : 'Composer 3 variantes'}
               </button>
               {error && <div className="error-msg">{error}</div>}
               {!accStartImage && <p className="hint">Importez l&apos;image de départ (étape 1).</p>}
-              {accStartImage && accessoryQueue.length === 0 && (
-                <p className="hint">Importez au moins un accessoire (étape 2).</p>
+              {accStartImage && !accImage && (
+                <p className="hint">Importez l&apos;image de l&apos;accessoire (étape 2).</p>
               )}
               {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
             </div>
@@ -1145,17 +1120,12 @@ export default function App() {
               <div className="spinner" />
               <p>
                 {activeTab === 'accessoires'
-                  ? `Composition de ${accessoryQueue.length} accessoire${accessoryQueue.length > 1 ? 's' : ''} en séquence… ${provider === 'azure' ? '2-4 min par étape (GPT image quality=high).' : '30-90s par étape.'}`
+                  ? `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (Azure GPT image medium), soit ~2-3 min au total. Upscale Magnific x4 dispo après sélection.' : '10-30 secondes.'}`
                   : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '2-4 min par variante (séquentiel Azure GPT image).' : '10-30 secondes.'}`}
               </p>
             </div>
           ) : variants.length > 0 ? (
             <>
-              {loading && activeTab === 'accessoires' && (
-                <div className="info-msg" style={{ marginBottom: '0.75rem' }}>
-                  Étape en cours : {accGeneratingStep ? getAccessoryDef(accGeneratingStep)?.label : '…'} ({variants.length}/{accessoryQueue.length} déjà ajouté{variants.length > 1 ? 's' : ''})
-                </div>
-              )}
               <div className="variant-grid">
                 {variants.map((v, i) => {
                   const badge = variantBadges[i] || `${i + 1}`;
