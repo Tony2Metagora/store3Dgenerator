@@ -114,7 +114,7 @@ export default function App() {
 
   // API config
   const [provider, setProvider] = useState<Provider>(
-    () => (localStorage.getItem('img_provider') as Provider) || 'gemini'
+    () => (localStorage.getItem('img_provider') as Provider) || 'azure'
   );
   const [apiEndpoint, setApiEndpoint] = useState<string>(() =>
     localStorage.getItem('nb_endpoint') ||
