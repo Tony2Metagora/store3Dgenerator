@@ -236,23 +236,33 @@ export async function callAzureOpenAI(
   return callImagesEdits([modelImage, brandImage], prompt);
 }
 
+/**
+ * Génère N variantes Azure en SÉQUENTIEL.
+ *
+ * Pourquoi pas en parallèle ? Azure rate-limit gpt-image-2 (~10 req/min sur tier
+ * standard, et concurrency cap ~2) tue silencieusement les requêtes simultanées
+ * → on n'obtenait que 1 image sur 3. Le séquentiel coûte ~3× plus de temps mur
+ * (≈90-180s par variante, soit 3-9 min au total) mais garantit les N variantes.
+ */
 export async function callAzureOpenAIBatch(
   modelImage: string,
   brandImage: string,
   prompt: string,
   count = 3
 ): Promise<string[]> {
-  const settled = await Promise.all(
-    Array.from({ length: count }, () =>
-      callAzureOpenAI(modelImage, brandImage, prompt).then(
-        (img) => ({ ok: true as const, img }),
-        (err: unknown) => ({ ok: false as const, err })
-      )
-    )
-  );
-  const successes = settled.flatMap((r) => (r.ok ? [r.img] : []));
+  const successes: string[] = [];
+  const failures: unknown[] = [];
+  for (let i = 0; i < count; i++) {
+    try {
+      console.log(`[callAzureOpenAIBatch] variante ${i + 1}/${count} en cours…`);
+      const img = await callAzureOpenAI(modelImage, brandImage, prompt);
+      successes.push(img);
+    } catch (err) {
+      console.warn(`[callAzureOpenAIBatch] variante ${i + 1}/${count} échouée :`, err);
+      failures.push(err);
+    }
+  }
   if (successes.length === 0) {
-    const failures = settled.flatMap((r) => (r.ok ? [] : [r.err]));
     console.error('[callAzureOpenAIBatch] toutes les variantes ont échoué :', failures);
     const first = failures[0];
     const msg = first instanceof Error ? first.message : String(first || 'erreur inconnue');
@@ -260,8 +270,7 @@ export async function callAzureOpenAIBatch(
   }
   if (successes.length < count) {
     console.warn(
-      `[callAzureOpenAIBatch] ${count - successes.length} variante(s) échouée(s) sur ${count}`,
-      settled.filter((r) => !r.ok)
+      `[callAzureOpenAIBatch] ${count - successes.length} variante(s) échouée(s) sur ${count} — voir warnings ci-dessus`
     );
   }
   return successes;

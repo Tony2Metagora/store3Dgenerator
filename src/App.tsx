@@ -1,8 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { buildBrandPrompt, buildAvatarPrompt, DEFAULT_AVATAR_CADRAGE } from './brands';
+import {
+  buildBrandPrompt,
+  buildAvatarPrompt,
+  buildAccessoryPrompt,
+  ACCESSORY_DEFS,
+  getAccessoryDef,
+  DEFAULT_AVATAR_CADRAGE,
+  type AccessoryCategory,
+} from './brands';
 import { MOULES, getMouleById, type MouleCategory } from './moules';
 import { loadMoule, saveMoule, listMouleIds } from './moulesStore';
 import {
+  callNanoBanana,
   callNanoBananaBatch,
   generateMouleFromPrompt,
   setApiConfig,
@@ -15,6 +24,7 @@ import {
   TARGET_HEIGHT,
 } from './nanoBananaClient';
 import {
+  callAzureOpenAI,
   callAzureOpenAIBatch,
   generateMouleFromAzure,
   editImageWithAzureOpenAI,
@@ -24,7 +34,20 @@ import {
 import './styles.css';
 
 type Provider = 'gemini' | 'azure';
-type Tab = 'boutique' | 'avatar';
+type Tab = 'boutique' | 'avatar' | 'accessoires';
+
+const EMPTY_ACCESSORY_IMAGES: Record<AccessoryCategory, string | null> = {
+  bijou: null,
+  foulard: null,
+  sac: null,
+  ceinture: null,
+};
+const EMPTY_ACCESSORY_NAMES: Record<AccessoryCategory, string> = {
+  bijou: '',
+  foulard: '',
+  sac: '',
+  ceinture: '',
+};
 
 const PREVIEW_COUNT = 3;
 
@@ -59,8 +82,20 @@ export default function App() {
   const [avatarContext, setAvatarContext] = useState<string>(DEFAULT_AVATAR_CADRAGE);
   const [avatarPrompt, setAvatarPrompt] = useState<string>('');
 
+  // Accessoires inputs (tab Accessoires)
+  const [accStartImage, setAccStartImage] = useState<string | null>(null);
+  const [accStartName, setAccStartName] = useState<string>('');
+  const [accStartDragging, setAccStartDragging] = useState(false);
+  const [accImages, setAccImages] = useState<Record<AccessoryCategory, string | null>>(
+    EMPTY_ACCESSORY_IMAGES
+  );
+  const [accNames, setAccNames] = useState<Record<AccessoryCategory, string>>(EMPTY_ACCESSORY_NAMES);
+  const [accDragging, setAccDragging] = useState<AccessoryCategory | null>(null);
+  const [accGeneratingStep, setAccGeneratingStep] = useState<AccessoryCategory | null>(null);
+
   // Preview variants
   const [variants, setVariants] = useState<string[]>([]);
+  const [variantBadges, setVariantBadges] = useState<string[]>([]); // labels custom (sinon "1", "2", "3")
   const [selectedVariant, setSelectedVariant] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -160,6 +195,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('active_tab', activeTab);
     setVariants([]);
+    setVariantBadges([]);
     setSelectedVariant(null);
     setError(null);
     setResultError(null);
@@ -245,6 +281,58 @@ export default function App() {
     if (file) readBoutiqueBgFile(file);
   }, []);
 
+  // ─── Uploads tab Accessoires ───
+  const readAccStartFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setAccStartName(file.name);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAccStartImage(reader.result as string);
+      setVariants([]);
+      setVariantBadges([]);
+      setSelectedVariant(null);
+      setError(null);
+      setResultError(null);
+    };
+    reader.readAsDataURL(file);
+  };
+  const handleAccStartFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) readAccStartFile(file);
+  };
+  const handleAccStartDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setAccStartDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) readAccStartFile(file);
+  }, []);
+
+  const readAccSlotFile = (cat: AccessoryCategory, file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAccImages((prev) => ({ ...prev, [cat]: reader.result as string }));
+      setAccNames((prev) => ({ ...prev, [cat]: file.name }));
+    };
+    reader.readAsDataURL(file);
+  };
+  const handleAccSlotChange =
+    (cat: AccessoryCategory) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) readAccSlotFile(cat, file);
+      e.target.value = '';
+    };
+  const handleAccSlotDrop = (cat: AccessoryCategory) => (e: React.DragEvent) => {
+    e.preventDefault();
+    setAccDragging(null);
+    const file = e.dataTransfer.files?.[0];
+    if (file) readAccSlotFile(cat, file);
+  };
+  const clearAccSlot = (cat: AccessoryCategory) => {
+    setAccImages((prev) => ({ ...prev, [cat]: null }));
+    setAccNames((prev) => ({ ...prev, [cat]: '' }));
+  };
+
   // ─── Génération 3 variantes en parallèle (dispatch selon provider) ───
   const handleGenerate = async () => {
     if (!selectedMouleData || !brandImage) return;
@@ -296,6 +384,64 @@ export default function App() {
       console.error('[handleGenerateAvatar] échec :', err);
       setError(err instanceof Error ? err.message : 'Erreur inconnue.');
     } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Génération séquentielle des accessoires (tab Accessoires) ───
+  // Chaîne les appels API : départ → +bijou → +foulard → +sac → +ceinture.
+  // Seuls les slots remplis sont ajoutés. Chaque étape intermédiaire est
+  // exposée comme "variante" pour comparer, la dernière étant sélectionnée.
+  const handleGenerateAccessories = async () => {
+    if (!accStartImage) return;
+    const queue = ACCESSORY_DEFS.filter((a) => accImages[a.id]);
+    if (queue.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+    setResultError(null);
+    setVariants([]);
+    setVariantBadges([]);
+    setSelectedVariant(null);
+    setAltSize(null);
+
+    const callApi =
+      provider === 'azure'
+        ? (current: string, accImg: string, p: string) => callAzureOpenAI(current, accImg, p)
+        : (current: string, accImg: string, p: string) => callNanoBanana(current, accImg, p);
+
+    let current = accStartImage;
+    const steps: string[] = [];
+    const badges: string[] = [];
+
+    try {
+      for (let i = 0; i < queue.length; i++) {
+        const acc = queue[i];
+        const accImg = accImages[acc.id];
+        if (!accImg) continue;
+        setAccGeneratingStep(acc.id);
+        console.log(`[Accessoires] ${i + 1}/${queue.length} — ajout ${acc.label}…`);
+        const next = await callApi(current, accImg, buildAccessoryPrompt(acc));
+        current = next;
+        steps.push(next);
+        badges.push(`${acc.emoji} ${acc.label}`);
+        // Mise à jour incrémentale pour que l'utilisateur voie les étapes s'afficher
+        setVariants([...steps]);
+        setVariantBadges([...badges]);
+        setSelectedVariant(steps.length - 1);
+      }
+    } catch (err: unknown) {
+      console.error('[handleGenerateAccessories] échec :', err);
+      const failedAt = badges.length;
+      const total = queue.length;
+      const baseMsg = err instanceof Error ? err.message : 'Erreur inconnue.';
+      setError(
+        steps.length > 0
+          ? `Échec à l'étape ${failedAt + 1}/${total} (${queue[failedAt]?.label ?? '?'}). ${baseMsg} — ${steps.length} étape(s) intermédiaire(s) disponible(s).`
+          : `${baseMsg}`
+      );
+    } finally {
+      setAccGeneratingStep(null);
       setLoading(false);
     }
   };
@@ -412,6 +558,9 @@ export default function App() {
   const activeKey = provider === 'azure' ? azureKey : apiKey;
   const canGenerateBoutique = !!selectedMouleData && !!brandImage && !!activeKey && !loading;
   const canGenerateAvatar = !!avatarImage && !!boutiqueBgImage && !!activeKey && !loading;
+  const accessoryQueue = ACCESSORY_DEFS.filter((a) => accImages[a.id]);
+  const canGenerateAccessoires =
+    !!accStartImage && accessoryQueue.length > 0 && !!activeKey && !loading;
 
   return (
     <div className="app">
@@ -536,6 +685,7 @@ export default function App() {
           {([
             { key: 'boutique' as Tab, label: 'Fond de boutique' },
             { key: 'avatar' as Tab, label: 'Avatar dans boutique' },
+            { key: 'accessoires' as Tab, label: 'Accessoires' },
           ]).map((t) => (
             <button
               key={t.key}
@@ -815,31 +965,148 @@ export default function App() {
               {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
             </div>
           </>)}
+
+          {/* TAB ACCESSOIRES — étape 1 image de départ, étape 2 slots accessoires, étape 3 composition séquentielle */}
+          {activeTab === 'accessoires' && (<>
+            {/* Étape 1 — Image de départ */}
+            <div className="card">
+              <h2><span className="step-num">1</span> Image de départ</h2>
+              <p className="hint" style={{ marginBottom: '0.6rem' }}>
+                Photo de la personne sur laquelle on va ajouter les accessoires (en général, une variante de l&apos;onglet « Avatar dans boutique » téléchargée puis ré-importée ici).
+              </p>
+              <div
+                className={`upload-zone ${accStartDragging ? 'dragging' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setAccStartDragging(true); }}
+                onDragLeave={() => setAccStartDragging(false)}
+                onDrop={handleAccStartDrop}
+              >
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleAccStartFileChange} />
+                <div className="icon">🖼️</div>
+                <p>Glissez-déposez ou cliquez pour sélectionner<br />l&apos;image de départ (JPEG / PNG / WebP)</p>
+              </div>
+              {accStartImage && (
+                <div className="upload-preview">
+                  <img src={accStartImage} alt={accStartName} />
+                </div>
+              )}
+            </div>
+
+            {/* Étape 2 — Accessoires (4 slots indépendants) */}
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2><span className="step-num">2</span> Accessoires à ajouter</h2>
+              <p className="hint" style={{ marginBottom: '0.6rem' }}>
+                Importez une image par catégorie souhaitée (ordre d&apos;application : {ACCESSORY_DEFS.map((a) => a.label.toLowerCase()).join(' → ')}). Les slots vides sont ignorés.
+              </p>
+              <div className="accessoires-grid">
+                {ACCESSORY_DEFS.map((acc) => {
+                  const img = accImages[acc.id];
+                  const name = accNames[acc.id];
+                  const isDragging = accDragging === acc.id;
+                  const isCurrent = accGeneratingStep === acc.id;
+                  return (
+                    <div key={acc.id} className={`accessoire-slot${isCurrent ? ' generating' : ''}`}>
+                      <div className="accessoire-header">
+                        <span className="accessoire-emoji">{acc.emoji}</span>
+                        <strong>{acc.label}</strong>
+                        {img && (
+                          <button
+                            type="button"
+                            className="btn-clear-slot"
+                            onClick={() => clearAccSlot(acc.id)}
+                            title="Retirer cet accessoire"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      <div
+                        className={`upload-zone compact ${isDragging ? 'dragging' : ''}`}
+                        onDragOver={(e) => { e.preventDefault(); setAccDragging(acc.id); }}
+                        onDragLeave={() => setAccDragging(null)}
+                        onDrop={handleAccSlotDrop(acc.id)}
+                      >
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={handleAccSlotChange(acc.id)}
+                        />
+                        {img ? (
+                          <>
+                            <img src={img} alt={name} className="accessoire-thumb" />
+                            <p className="accessoire-filename">{name}</p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="icon" style={{ fontSize: '1.4rem' }}>📤</div>
+                            <p style={{ fontSize: '0.78rem' }}>Importer une image</p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Étape 3 — Composer */}
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2><span className="step-num">3</span> Composer ({accessoryQueue.length} étape{accessoryQueue.length > 1 ? 's' : ''})</h2>
+              <button
+                className="btn-generate"
+                disabled={!canGenerateAccessoires}
+                onClick={handleGenerateAccessories}
+              >
+                {loading
+                  ? accGeneratingStep
+                    ? `Ajout ${getAccessoryDef(accGeneratingStep)?.label}…`
+                    : 'Composition…'
+                  : `Composer (${accessoryQueue.length} accessoire${accessoryQueue.length > 1 ? 's' : ''})`}
+              </button>
+              {error && <div className="error-msg">{error}</div>}
+              {!accStartImage && <p className="hint">Importez l&apos;image de départ (étape 1).</p>}
+              {accStartImage && accessoryQueue.length === 0 && (
+                <p className="hint">Importez au moins un accessoire (étape 2).</p>
+              )}
+              {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
+            </div>
+          </>)}
         </div>
 
         {/* ── Colonne droite : Previews + Actions ── */}
         <div className="card preview-panel">
           <h2>Résultats ({TARGET_WIDTH}×{TARGET_HEIGHT})</h2>
 
-          {loading ? (
+          {loading && variants.length === 0 ? (
             <div className="loading">
               <div className="spinner" />
-              <p>{PREVIEW_COUNT} variantes en cours… 10-30 secondes.</p>
+              <p>
+                {activeTab === 'accessoires'
+                  ? `Composition de ${accessoryQueue.length} accessoire${accessoryQueue.length > 1 ? 's' : ''} en séquence… 30-90s par étape.`
+                  : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (séquentiel Azure).' : '10-30 secondes.'}`}
+              </p>
             </div>
           ) : variants.length > 0 ? (
             <>
+              {loading && activeTab === 'accessoires' && (
+                <div className="info-msg" style={{ marginBottom: '0.75rem' }}>
+                  Étape en cours : {accGeneratingStep ? getAccessoryDef(accGeneratingStep)?.label : '…'} ({variants.length}/{accessoryQueue.length} déjà ajouté{variants.length > 1 ? 's' : ''})
+                </div>
+              )}
               <div className="variant-grid">
-                {variants.map((v, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    className={`variant-thumb${selectedVariant === i ? ' selected' : ''}`}
-                    onClick={() => { setSelectedVariant(i); setAltSize(null); }}
-                  >
-                    <img src={v} alt={`Variante ${i + 1}`} />
-                    <span className="variant-badge">{i + 1}</span>
-                  </button>
-                ))}
+                {variants.map((v, i) => {
+                  const badge = variantBadges[i] || `${i + 1}`;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`variant-thumb${selectedVariant === i ? ' selected' : ''}`}
+                      onClick={() => { setSelectedVariant(i); setAltSize(null); }}
+                    >
+                      <img src={v} alt={badge} />
+                      <span className="variant-badge">{badge}</span>
+                    </button>
+                  );
+                })}
               </div>
 
               {activeImage && (

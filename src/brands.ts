@@ -62,3 +62,76 @@ STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm pleine ouv
 
 À ÉVITER : visage différent du personnage source, plusieurs personnes, architecture modifiée, ombre incohérente, effet collage / découpage, style cartoon, texte illisible, watermark, cadrage trop large où le personnage devient minuscule.`;
 }
+
+// ─── Accessoires ─────────────────────────────────────────
+
+export type AccessoryCategory = 'bijou' | 'foulard' | 'sac' | 'ceinture';
+
+export interface AccessoryDef {
+  id: AccessoryCategory;
+  label: string;
+  emoji: string;
+  /** Description courte du type d'accessoire pour le prompt. */
+  itemDescription: string;
+  /** Zone du corps où l'accessoire doit apparaître. */
+  bodyZone: string;
+}
+
+export const ACCESSORY_DEFS: AccessoryDef[] = [
+  {
+    id: 'bijou',
+    label: 'Bijou',
+    emoji: '💎',
+    itemDescription: 'le bijou (collier, bracelet, bague, boucles d\'oreilles, broche)',
+    bodyZone: 'au niveau du cou, des poignets, des doigts ou des oreilles selon le type de bijou présenté',
+  },
+  {
+    id: 'foulard',
+    label: 'Foulard',
+    emoji: '🧣',
+    itemDescription: 'le foulard / écharpe / châle',
+    bodyZone: 'autour du cou ou sur les épaules, drapé naturellement avec des plis réalistes',
+  },
+  {
+    id: 'sac',
+    label: 'Sac',
+    emoji: '👜',
+    itemDescription: 'le sac (sac à main, sac à dos, pochette, sac bandoulière)',
+    bodyZone: 'porté à la main, sur l\'épaule ou en bandoulière selon le type de sac, avec la sangle correctement positionnée',
+  },
+  {
+    id: 'ceinture',
+    label: 'Ceinture',
+    emoji: '➰',
+    itemDescription: 'la ceinture',
+    bodyZone: 'à la taille, par-dessus le vêtement, correctement ajustée et bouclée',
+  },
+];
+
+export function getAccessoryDef(id: AccessoryCategory): AccessoryDef | undefined {
+  return ACCESSORY_DEFS.find((a) => a.id === id);
+}
+
+/**
+ * Prompt pour ajouter UN accessoire sur une image existante.
+ *
+ * Deux images sont fournies dans cet ordre :
+ *  1. Image de départ (avatar + boutique, déjà composée)
+ *  2. Image de l'accessoire à ajouter
+ *
+ * L'opération doit préserver TOUT sauf l'ajout ciblé de l'accessoire.
+ */
+export function buildAccessoryPrompt(accessory: AccessoryDef): string {
+  return `Ajoute l'accessoire de l'image 2 (${accessory.itemDescription}) sur le personnage présent dans l'image 1, en respectant strictement le modèle de l'accessoire.
+
+CONSIGNES STRICTES :
+1. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la tenue et la pose du personnage de l'image 1. Le personnage doit rester identique au pixel près partout sauf à l'endroit où l'accessoire est ajouté.
+2. Préserve EXACTEMENT l'arrière-plan, l'architecture, l'éclairage, les vitrines, les produits, le sol et la perspective de l'image 1. Rien d'autre que le personnage ne doit changer.
+3. Place l'accessoire ${accessory.bodyZone}. L'accessoire doit reprendre fidèlement la forme, la couleur, les matériaux, les détails et le style exact de l'image 2 (mêmes finitions, mêmes motifs, mêmes proportions).
+4. Lumière et ombres cohérentes avec la scène : l'accessoire doit recevoir la même direction de lumière que le personnage et projeter des ombres réalistes sur le vêtement / la peau, sans effet "collage" ni "détourage".
+5. Échelle réaliste : l'accessoire doit avoir une taille crédible par rapport au personnage et au cadre, ni trop grand ni trop petit.
+
+STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm, lumière naturelle douce, format 16:9 paysage. Le rendu final doit être indiscernable d'une photo réelle du personnage portant l'accessoire.
+
+À ÉVITER : modifier le visage / la pose / les vêtements existants, dupliquer ou multiplier l'accessoire, mauvaise échelle, mauvaise position anatomique, ombres incohérentes, effet découpe-collage, style cartoon, watermark, texte illisible, modification du décor.`;
+}
