@@ -1,12 +1,11 @@
 /**
  * Client Azure OpenAI — gpt-image-2 (compatible gpt-image-1).
  *
- * Couvre les 5 flux de l'app :
+ * Couvre les 4 flux de l'app :
  *   - callAzureOpenAI            : modèle 3D + photo marque + prompt → 1 image (POST /images/edits, 2 images en input)
  *   - callAzureOpenAIBatch       : N variantes en parallèle (idem mais N appels)
  *   - generateMouleFromAzure     : prompt texte seul → 1 image moule (POST /images/generations, sans image en input)
  *   - editImageWithAzureOpenAI   : 1 image + prompt → 1 image (POST /images/edits)
- *   - refineImageWithAzureOpenAI : 1 image + REFINE_PROMPT → 1 image (POST /images/edits)
  *
  * Auth : header `Authorization: Bearer <KEY>` (cf. portail Azure → Get Started → curl).
  *
@@ -14,7 +13,7 @@
  * /images/edits, on bascule sur le bon endpoint en interne via normalizeAzureUrl.
  */
 
-import { fit16x9AndCompress, REFINE_PROMPT } from './nanoBananaClient';
+import { fit16x9AndCompress } from './nanoBananaClient';
 
 let runtimeAzureEndpoint = '';
 let runtimeAzureApiKey = '';
@@ -413,8 +412,4 @@ export async function editImageWithAzureOpenAI(
   editPrompt: string
 ): Promise<string> {
   return callImagesEdits([imageDataUrl], editPrompt);
-}
-
-export async function refineImageWithAzureOpenAI(imageDataUrl: string): Promise<string> {
-  return callImagesEdits([imageDataUrl], REFINE_PROMPT);
 }

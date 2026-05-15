@@ -560,8 +560,6 @@ body {
   color: var(--accent);
 }
 .btn-edit:hover:not(:disabled) { background: var(--accent); color: #fff; }
-.btn-refine { border-color: #8b5cf6; color: #8b5cf6; }
-.btn-refine:hover:not(:disabled) { background: #8b5cf6; color: #fff; }
 .btn-upscale { border-color: #db2777; color: #db2777; }
 .btn-upscale:hover:not(:disabled) { background: #db2777; color: #fff; }
 .btn-download-action { border-color: #059669; color: #059669; }

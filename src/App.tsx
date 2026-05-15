@@ -17,7 +17,6 @@ import {
   setEditEndpoint,
   setFreepikApiKey,
   editImageWithGemini,
-  refineImageQuality,
   resizeToTargetHeight,
   padToAzureEditRatio,
   upscaleWithMagnific,
@@ -29,7 +28,6 @@ import {
   callAzureOpenAIBatch,
   generateMouleFromAzure,
   editImageWithAzureOpenAI,
-  refineImageWithAzureOpenAI,
   setAzureConfig,
 } from './openaiImageClient';
 import { analyzeAccessorySafe } from './visionClient';
@@ -90,7 +88,6 @@ export default function App() {
 
   // Post-actions
   const [editing, setEditing] = useState(false);
-  const [refining, setRefining] = useState(false);
   const [resizing, setResizing] = useState(false);
   const [editPrompt, setEditPrompt] = useState<string>('');
   const [altSize, setAltSize] = useState<{ width: number; height: number } | null>(null);
@@ -493,24 +490,6 @@ export default function App() {
     }
   };
 
-  const handleRefine = async () => {
-    if (!activeImage || selectedVariant === null) return;
-    setRefining(true);
-    setResultError(null);
-    try {
-      const refined = provider === 'azure'
-        ? await refineImageWithAzureOpenAI(activeImage)
-        : await refineImageQuality(activeImage);
-      setVariants((prev) => prev.map((v, i) => (i === selectedVariant ? refined : v)));
-      setAltSize(null);
-    } catch (err: unknown) {
-      console.error('[handleRefine] échec :', err);
-      setResultError(err instanceof Error ? err.message : 'Erreur lors du raffinement.');
-    } finally {
-      setRefining(false);
-    }
-  };
-
   const handleUpscale = async () => {
     if (!activeImage || selectedVariant === null) return;
     if (!freepikApiKeyState) {
@@ -569,7 +548,7 @@ export default function App() {
     a.click();
   };
 
-  const isBusy = editing || refining || resizing || upscaling;
+  const isBusy = editing || resizing || upscaling;
   const missingMoules = MOULES.filter((m) => !moulesData[m.id]);
   const activeKey = provider === 'azure' ? azureKey : apiKey;
   const canGenerateBoutique = !!selectedMouleData && !!brandImage && !!activeKey && !loading;
@@ -1193,13 +1172,10 @@ export default function App() {
                     </div>
                   )}
 
-                  {(editing || refining) && (
+                  {editing && (
                     <div className="loading" style={{ marginTop: '0.75rem', padding: '1rem' }}>
                       <div className="spinner" />
-                      <p>
-                        {editing && `Modification en cours via ${provider === 'azure' ? 'Azure OpenAI' : 'Gemini'}…`}
-                        {refining && `Raffinement qualité via ${provider === 'azure' ? 'Azure OpenAI' : 'Gemini'}… 10-30 s.`}
-                      </p>
+                      <p>Modification en cours via {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'}…</p>
                     </div>
                   )}
 
@@ -1226,16 +1202,13 @@ export default function App() {
                   </div>
 
                   <div className="result-actions" style={{ marginTop: '1rem' }}>
-                    <button className="btn-action btn-refine" onClick={handleRefine} disabled={isBusy}>
-                      {refining ? '⏳ Raffinement…' : '✨ Améliorer qualité'}
-                    </button>
                     <button
                       className="btn-action btn-upscale"
                       onClick={handleUpscale}
                       disabled={isBusy || !freepikApiKeyState}
                       title={freepikApiKeyState ? 'Upscale x4 via Magnific Illusio (30s-2min)' : "Configure d'abord la clé API Freepik dans les paramètres"}
                     >
-                      {upscaling ? '⏳ Upscale…' : '🔍 Upscale Magnific x4'}
+                      {upscaling ? '⏳ Upscale…' : '✨ Améliorer la qualité (Upscale Magnific x4)'}
                     </button>
                     <button className="btn-action btn-download-action" onClick={handleDownload} disabled={isBusy}>
                       💾 Télécharger
@@ -1255,6 +1228,12 @@ export default function App() {
                       onChange={handleAltUpload}
                     />
                   </div>
+                  {!freepikApiKeyState && (
+                    <p className="hint" style={{ marginTop: '0.5rem' }}>
+                      🔑 Bouton « Améliorer la qualité » grisé : renseigne ta clé API Freepik
+                      dans « Paramètres API » (en haut de page) pour activer l&apos;upscale Magnific x4.
+                    </p>
+                  )}
                 </>
               )}
             </>

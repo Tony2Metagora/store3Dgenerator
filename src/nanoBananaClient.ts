@@ -315,19 +315,6 @@ export async function editImageWithGemini(
 }
 
 /**
- * Raffinement qualité : renvoie la même image au modèle avec un prompt
- * de "re-rendu net" pour récupérer des détails plus précis. Préserve
- * la composition exacte (camera angle, products, lighting).
- */
-export const REFINE_PROMPT = `Re-render this exact image at maximum photographic quality.
-
-STRICTLY PRESERVE: exact composition, exact camera angle, exact perspective, exact architecture, exact furniture placement, exact products and their positions, exact colors, exact logo placement, exact lighting direction.
-
-IMPROVE ONLY: sharpness, fine texture detail on materials (wood grain, fabric weave, metal reflections, glass transparency), product edge definition, realistic micro-shadows, natural light falloff, subtle surface imperfections typical of a real high-end retail photograph.
-
-Output a photorealistic ultra-sharp 4K landscape photograph, 16:9 ratio, as if shot with a 35 mm full-frame camera at f/5.6, crisp focus throughout the scene.`;
-
-/**
  * Upscale via Magnific Illusio (appel direct Freepik API depuis le browser).
  * Freepik accepte CORS * → on bypass le proxy Cloudflare Worker (qui était
  * bloqué par anti-bot Freepik sur les IPs egress Workers).
@@ -403,19 +390,5 @@ export async function upscaleWithMagnific(
     // sinon : CREATED / IN_PROGRESS → on continue
   }
   throw new Error('Magnific : timeout (>3min) — réessaie ou vérifie le quota Freepik.');
-}
-
-export async function refineImageQuality(imageDataUrl: string): Promise<string> {
-  const EDIT_ENDPOINT = getEditEndpoint();
-  const API_KEY = getApiKey();
-  if (!EDIT_ENDPOINT) throw new Error('Endpoint de modification non configuré.');
-  if (!API_KEY) throw new Error('Clé API non configurée.');
-
-  const img = parseDataUrl(imageDataUrl);
-  const raw = await callGemini(EDIT_ENDPOINT, API_KEY, [
-    { text: REFINE_PROMPT },
-    { inlineData: { mimeType: img.mimeType, data: img.data } },
-  ]);
-  return fit16x9AndCompress(raw);
 }
 
