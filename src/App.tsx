@@ -20,7 +20,6 @@ import {
   setFreepikApiKey,
   editImageWithGemini,
   resizeToTargetHeight,
-  padToAzureEditRatio,
   upscaleWithMagnific,
   getImageSize,
   TARGET_WIDTH,
@@ -503,16 +502,13 @@ export default function App() {
       setAccAnalyzing(false);
 
       // 2. Génération des 3 variantes avec le prompt enrichi du brief Vision.
+      // gpt-image-2 (Azure) comme Gemini génèrent en 16:9 natif → on envoie
+      // l'image de départ telle quelle, sans pad ni crop : aucune conversion
+      // de ratio, donc le modèle n'a plus de raison de recadrer la scène.
       const prompt = buildAccessoryPrompt(acc, accExtraInstruction, visionDescription);
-      // Azure /edits ne sort que du 3:2 → on pad l'image de départ 16:9 au
-      // ratio Azure pour que le modèle édite sans recomposer (centrage du
-      // personnage préservé). Gemini sort du 16:9 natif → pas de pad.
-      const startForGen = provider === 'azure'
-        ? await padToAzureEditRatio(accStartImage)
-        : accStartImage;
       const results = provider === 'azure'
-        ? await callAzureOpenAIBatch(startForGen, accImage, prompt, PREVIEW_COUNT, 'medium')
-        : await callNanoBananaBatch(startForGen, accImage, prompt, PREVIEW_COUNT);
+        ? await callAzureOpenAIBatch(accStartImage, accImage, prompt, PREVIEW_COUNT, 'medium')
+        : await callNanoBananaBatch(accStartImage, accImage, prompt, PREVIEW_COUNT);
       if (results.length === 0) {
         setError(
           `Aucune variante générée. Vérifiez votre ${provider === 'azure' ? 'clé Azure OpenAI' : 'clé Gemini'} et la console F12 pour le détail.`

@@ -258,8 +258,22 @@ async function parseImageResponse(response: Response, urlForErr: string): Promis
 export type ImageQuality = 'low' | 'medium' | 'high';
 
 /**
+ * Tailles de sortie Azure.
+ *
+ * gpt-image-2 (GA) accepte des résolutions arbitraires → on génère en 16:9
+ * natif 4K (3840×2160) : le modèle reçoit du 16:9 et rend du 16:9, AUCUNE
+ * conversion de ratio, donc plus de recomposition / recadrage / dézoom.
+ *
+ * gpt-image-1 / 1.5 ne supportent QUE 1024×1024 / 1024×1536 / 1536×1024 → si
+ * le déploiement est l'un de ceux-là, Azure refuse le 3840×2160 en HTTP 400
+ * ("size") et on retombe automatiquement sur le 3:2 (fit16x9 recadre ensuite).
+ */
+const PREFERRED_SIZE = '3840x2160'; // 16:9 natif 4K — gpt-image-2
+const FALLBACK_SIZE = '1536x1024';  // 3:2 — gpt-image-1 / 1.5
+
+/**
  * POST /images/edits — accepte 1 ou plusieurs images en input.
- * Format target : 16:9 paysage (1536x1024) puis fit16x9 final côté front.
+ * Sortie 16:9 natif si gpt-image-2, sinon fallback 3:2 + fit16x9 côté front.
  * `quality` : 'high' (~90-180s, défaut), 'medium' (~30-60s), 'low' (~10-20s).
  */
 async function callImagesEdits(
@@ -274,26 +288,25 @@ async function callImagesEdits(
   // Azure exige `image` pour 1 seule image, `image[]` pour plusieurs (sinon erreur
   // "Duplicate parameter: 'image'").
   const fieldName = images.length > 1 ? 'image[]' : 'image';
-  const buildFormData = () => {
+  const buildInit = (size: string): RequestInit => {
     const fd = new FormData();
     fd.append('prompt', prompt);
     fd.append('n', '1');
-    fd.append('size', '1536x1024');
+    fd.append('size', size);
     fd.append('quality', quality);
     images.forEach((dataUrl, idx) => {
       const { blob, ext } = dataUrlToBlob(dataUrl);
       fd.append(fieldName, blob, `input-${idx}.${ext}`);
     });
-    return fd;
+    return {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body: fd,
+    };
   };
 
-  const buildInit = (): RequestInit => ({
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}` },
-    body: buildFormData(),
-  });
-
-  let response = await postWithRetry429(primaryUrl, buildInit);
+  let outputSize = PREFERRED_SIZE;
+  let response = await postWithRetry429(primaryUrl, () => buildInit(outputSize));
   let urlUsed = primaryUrl;
 
   // Retry avec api-version preview si 404 — gpt-image-2 ne supporte pas
@@ -304,8 +317,22 @@ async function callImagesEdits(
       `[Azure /edits] 404 avec api-version utilisateur, retry avec ${FALLBACK_API_VERSION}`,
       { primaryUrl, fallbackUrl }
     );
-    response = await postWithRetry429(fallbackUrl, buildInit);
+    response = await postWithRetry429(fallbackUrl, () => buildInit(outputSize));
     urlUsed = fallbackUrl;
+  }
+
+  // Fallback taille : un déploiement gpt-image-1 / 1.5 refuse le 16:9 4K en 400
+  // ("size not supported"). On retombe alors sur le 3:2 qu'ils savent produire.
+  if (response.status === 400 && outputSize === PREFERRED_SIZE) {
+    const errBody = await response.clone().text().catch(() => '');
+    if (/\bsize\b/i.test(errBody)) {
+      console.warn(
+        `[Azure /edits] size ${PREFERRED_SIZE} refusé (déploiement ≠ gpt-image-2 ?) — ` +
+        `fallback ${FALLBACK_SIZE}. Détail : ${errBody.slice(0, 200)}`
+      );
+      outputSize = FALLBACK_SIZE;
+      response = await postWithRetry429(urlUsed, () => buildInit(outputSize));
+    }
   }
 
   const rawDataUrl = await parseImageResponse(response, urlUsed);
@@ -319,21 +346,18 @@ async function callImagesGenerations(prompt: string): Promise<string> {
   const { rawEndpoint, apiKey } = ensureCreds();
   const primaryUrl = normalizeAzureUrl(rawEndpoint, 'generations');
 
-  const body = JSON.stringify({
-    prompt,
-    n: 1,
-    size: '1536x1024',
-    quality: 'high',
-    output_format: 'png',
-  });
   const headers = {
     'Authorization': `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
   };
+  const buildInit = (size: string): RequestInit => ({
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ prompt, n: 1, size, quality: 'high', output_format: 'png' }),
+  });
 
-  const buildInit = (): RequestInit => ({ method: 'POST', headers, body });
-
-  let response = await postWithRetry429(primaryUrl, buildInit);
+  let outputSize = PREFERRED_SIZE;
+  let response = await postWithRetry429(primaryUrl, () => buildInit(outputSize));
   let urlUsed = primaryUrl;
 
   // Même retry preview pour /generations au cas où.
@@ -343,8 +367,21 @@ async function callImagesGenerations(prompt: string): Promise<string> {
       `[Azure /generations] 404 avec api-version utilisateur, retry avec ${FALLBACK_API_VERSION}`,
       { primaryUrl, fallbackUrl }
     );
-    response = await postWithRetry429(fallbackUrl, buildInit);
+    response = await postWithRetry429(fallbackUrl, () => buildInit(outputSize));
     urlUsed = fallbackUrl;
+  }
+
+  // Fallback taille identique à /edits (cf. PREFERRED_SIZE / FALLBACK_SIZE).
+  if (response.status === 400 && outputSize === PREFERRED_SIZE) {
+    const errBody = await response.clone().text().catch(() => '');
+    if (/\bsize\b/i.test(errBody)) {
+      console.warn(
+        `[Azure /generations] size ${PREFERRED_SIZE} refusé (déploiement ≠ gpt-image-2 ?) — ` +
+        `fallback ${FALLBACK_SIZE}. Détail : ${errBody.slice(0, 200)}`
+      );
+      outputSize = FALLBACK_SIZE;
+      response = await postWithRetry429(urlUsed, () => buildInit(outputSize));
+    }
   }
 
   const rawDataUrl = await parseImageResponse(response, urlUsed);
