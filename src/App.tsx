@@ -17,7 +17,6 @@ import {
   generateMouleFromPrompt,
   setApiConfig,
   setEditEndpoint,
-  setFreepikApiKey,
   editImageWithGemini,
   resizeToTargetHeight,
   upscaleWithMagnific,
@@ -123,9 +122,6 @@ export default function App() {
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent'
   );
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('nb_apikey') || '');
-  const [freepikApiKeyState, setFreepikApiKeyState] = useState<string>(
-    () => localStorage.getItem('freepik_api_key') || ''
-  );
   const [upscaling, setUpscaling] = useState(false);
   const [azureEndpoint, setAzureEndpoint] = useState<string>(
     () => localStorage.getItem('azure_endpoint') || ''
@@ -163,12 +159,6 @@ export default function App() {
       setMoulesReady(true);
     })();
   }, []);
-
-  // Persist la clé API Freepik (appel direct Magnific Illusio depuis le browser).
-  useEffect(() => {
-    localStorage.setItem('freepik_api_key', freepikApiKeyState);
-    setFreepikApiKey(freepikApiKeyState);
-  }, [freepikApiKeyState]);
 
   // Persist & sync API config (les 2 jeux de credentials persistent en parallèle)
   useEffect(() => {
@@ -579,10 +569,6 @@ export default function App() {
 
   const handleUpscale = async () => {
     if (!activeImage || selectedVariant === null) return;
-    if (!freepikApiKeyState) {
-      setResultError('Clé API Freepik non configurée — renseigne-la dans Paramètres API.');
-      return;
-    }
     setUpscaling(true);
     setResultError(null);
     try {
@@ -754,21 +740,9 @@ export default function App() {
               </>
             )}
 
-            <div className="field" style={{ marginTop: '0.75rem', borderTop: '1px dashed var(--border)', paddingTop: '0.75rem' }}>
-              <label htmlFor="freepikApiKey">Clé API Freepik (Magnific Illusio)</label>
-              <input
-                id="freepikApiKey"
-                type="password"
-                value={freepikApiKeyState}
-                onChange={(e) => setFreepikApiKeyState(e.target.value)}
-                placeholder="FPSXxxxxxxxxxxxxxxxxxxxxxxxxx"
-              />
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                Crée la sur <a href="https://www.freepik.com/api" target="_blank" rel="noopener noreferrer">freepik.com/api</a> (plan API requis).
-                Une fois renseignée, le bouton <strong>🔍 Upscale Magnific x4</strong> s&apos;active sur chaque image générée.
-                Appel direct depuis le browser (CORS ouvert) — pas de proxy serveur.
-              </p>
-            </div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem', borderTop: '1px dashed var(--border)', paddingTop: '0.75rem' }}>
+              🔍 L&apos;upscale Magnific x4 passe par un proxy serveur (clé Freepik côté serveur) — rien à configurer ici.
+            </p>
 
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               Sauvegardé localement dans votre navigateur.
@@ -1416,8 +1390,8 @@ export default function App() {
                     <button
                       className="btn-action btn-upscale"
                       onClick={handleUpscale}
-                      disabled={isBusy || !freepikApiKeyState}
-                      title={freepikApiKeyState ? 'Upscale x4 via Magnific Illusio (30s-2min)' : "Configure d'abord la clé API Freepik dans les paramètres"}
+                      disabled={isBusy}
+                      title="Upscale x4 via Magnific Illusio (30s-2min)"
                     >
                       {upscaling ? '⏳ Upscale…' : '✨ Améliorer la qualité (Upscale Magnific x4)'}
                     </button>
@@ -1439,12 +1413,6 @@ export default function App() {
                       onChange={handleAltUpload}
                     />
                   </div>
-                  {!freepikApiKeyState && (
-                    <p className="hint" style={{ marginTop: '0.5rem' }}>
-                      🔑 Bouton « Améliorer la qualité » grisé : renseigne ta clé API Freepik
-                      dans « Paramètres API » (en haut de page) pour activer l&apos;upscale Magnific x4.
-                    </p>
-                  )}
                 </>
               )}
             </>

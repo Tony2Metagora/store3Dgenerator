@@ -1,0 +1,7 @@
+{
+  "name": "freepik-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Proxy serverless Vercel pour l'upscale Magnific Illusio (Freepik API)."
+}

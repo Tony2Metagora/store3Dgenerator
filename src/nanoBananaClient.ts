@@ -1,7 +1,11 @@
 let runtimeEndpoint = '';
 let runtimeApiKey = '';
 let runtimeEditEndpoint = '';
-let runtimeFreepikApiKey = '';
+
+// Proxy Vercel pour l'API Freepik (clé côté serveur + CORS géré).
+// Un appel direct à api.freepik.com depuis le navigateur échoue (« Failed to
+// fetch ») : preflight CORS non géré. Code du proxy : dossier freepik-proxy/.
+const MAGNIFIC_PROXY = 'https://freepik-proxy-theta.vercel.app/api/magnific';
 
 export function setApiConfig(endpoint: string, apiKey: string) {
   runtimeEndpoint = endpoint;
@@ -10,10 +14,6 @@ export function setApiConfig(endpoint: string, apiKey: string) {
 
 export function setEditEndpoint(url: string) {
   runtimeEditEndpoint = url;
-}
-
-export function setFreepikApiKey(key: string) {
-  runtimeFreepikApiKey = key;
 }
 
 function getEndpoint() {
@@ -257,17 +257,20 @@ export async function editImageWithGemini(
 }
 
 /**
- * Upscale via Magnific Illusio (appel direct Freepik API depuis le browser).
- * Freepik accepte CORS * → on bypass le proxy Cloudflare Worker (qui était
- * bloqué par anti-bot Freepik sur les IPs egress Workers).
+ * Upscale via Magnific Illusio (API Freepik).
+ *
+ * Les appels API (création du job + polling) passent par le proxy Vercel
+ * MAGNIFIC_PROXY : la clé Freepik reste côté serveur et le CORS est géré
+ * (un appel direct à api.freepik.com depuis le navigateur échoue — preflight
+ * CORS non géré, « Failed to fetch »). Le téléchargement final de l'image
+ * upscalée se fait en direct depuis le CDN Freepik (fichier volumineux).
+ *
  * Async : POST → polling toutes les 5s, max ~3min. Retourne le dataUrl upscalé.
  */
 export async function upscaleWithMagnific(
   imageDataUrl: string,
   opts: { scale?: 2 | 4 | 8 | 16; creativity?: number; resemblance?: number } = {}
 ): Promise<string> {
-  const apiKey = runtimeFreepikApiKey;
-  if (!apiKey) throw new Error('Clé API Freepik non configurée (Paramètres API → Clé API Freepik).');
   if (!imageDataUrl.startsWith('data:image/')) throw new Error('Image invalide (data URL attendue).');
 
   const m = imageDataUrl.match(/^data:image\/[a-zA-Z+]+;base64,(.+)$/s);
@@ -277,13 +280,10 @@ export async function upscaleWithMagnific(
   const scaleNum = opts.scale ?? 4;
   const scale_factor = scaleNum >= 16 ? '16x' : scaleNum >= 8 ? '8x' : scaleNum >= 4 ? '4x' : '2x';
 
-  // 1. Création du job
-  const createRes = await fetch('https://api.freepik.com/v1/ai/image-upscaler', {
+  // 1. Création du job (via le proxy Vercel — pas de clé côté client)
+  const createRes = await fetch(MAGNIFIC_PROXY, {
     method: 'POST',
-    headers: {
-      'x-freepik-api-key': apiKey,
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       image: imageB64,
       scale_factor,
@@ -303,13 +303,11 @@ export async function upscaleWithMagnific(
   const taskId = created?.data?.task_id;
   if (!taskId) throw new Error('Magnific : task_id manquant');
 
-  // 2. Polling (max ~3min)
+  // 2. Polling (max ~3min) — via le proxy
   const maxAttempts = 36; // 36 × 5s = 180s
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 5000));
-    const pollRes = await fetch(`https://api.freepik.com/v1/ai/image-upscaler/${encodeURIComponent(taskId)}`, {
-      headers: { 'x-freepik-api-key': apiKey },
-    });
+    const pollRes = await fetch(`${MAGNIFIC_PROXY}?taskId=${encodeURIComponent(taskId)}`);
     if (!pollRes.ok) continue;
     const json = await pollRes.json() as { data?: { status?: string; generated?: string[]; error?: string } };
     const data = json?.data;
@@ -318,10 +316,20 @@ export async function upscaleWithMagnific(
     if (status === 'COMPLETED') {
       const outUrl = data?.generated?.[0];
       if (!outUrl) throw new Error('Magnific : pas d\'image générée');
-      // Fetch + convert to data URL pour rester compat avec le reste du pipeline
-      const imgRes = await fetch(outUrl);
-      if (!imgRes.ok) throw new Error(`Magnific image fetch HTTP ${imgRes.status}`);
-      const blob = await imgRes.blob();
+      // Téléchargement direct de l'image upscalée depuis le CDN Freepik,
+      // puis conversion en data URL pour rester compatible avec le pipeline.
+      let blob: Blob;
+      try {
+        const imgRes = await fetch(outUrl);
+        if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
+        blob = await imgRes.blob();
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        throw new Error(
+          'Image upscalée générée, mais son téléchargement depuis le CDN Freepik a '
+          + `échoué (probable blocage CORS du CDN). Détail : ${detail}`
+        );
+      }
       return await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
