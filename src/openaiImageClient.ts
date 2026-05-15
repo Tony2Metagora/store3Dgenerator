@@ -1,5 +1,5 @@
 /**
- * Client Azure OpenAI — gpt-image-2 (compatible gpt-image-1).
+ * Client Azure OpenAI — gpt-image-2.
  *
  * Couvre les 4 flux de l'app :
  *   - callAzureOpenAI            : modèle 3D + photo marque + prompt → 1 image (POST /images/edits, 2 images en input)
@@ -258,23 +258,23 @@ async function parseImageResponse(response: Response, urlForErr: string): Promis
 export type ImageQuality = 'low' | 'medium' | 'high';
 
 /**
- * Tailles de sortie Azure.
+ * Tailles de sortie — gpt-image-2 accepte les résolutions arbitraires.
  *
- * gpt-image-2 (GA) accepte des résolutions arbitraires → on génère en 16:9
- * natif 4K (3840×2160) : le modèle reçoit du 16:9 et rend du 16:9, AUCUNE
- * conversion de ratio, donc plus de recomposition / recadrage / dézoom.
+ * On génère TOUJOURS en 16:9 natif : le modèle reçoit du 16:9 et rend du 16:9,
+ * AUCUNE conversion de ratio → plus de recomposition / recadrage / dézoom.
  *
- * gpt-image-1 / 1.5 ne supportent QUE 1024×1024 / 1024×1536 / 1536×1024 → si
- * le déploiement est l'un de ceux-là, Azure refuse le 3840×2160 en HTTP 400
- * ("size") et on retombe automatiquement sur le 3:2 (fit16x9 recadre ensuite).
+ * PREFERRED = 4K (3840×2160), pile sur la borne max de 8,29 Mpx d'Azure.
+ * FALLBACK  = 16:9 légèrement plus petit (3584×2016), avec marge sous cette
+ * borne — utilisé uniquement si une région/api-version refuse le 4K en HTTP
+ * 400. Les DEUX sont du 16:9 : le cadrage reste correct dans tous les cas.
  */
-const PREFERRED_SIZE = '3840x2160'; // 16:9 natif 4K — gpt-image-2
-const FALLBACK_SIZE = '1536x1024';  // 3:2 — gpt-image-1 / 1.5
+const PREFERRED_SIZE = '3840x2160'; // 16:9 — 4K
+const FALLBACK_SIZE = '3584x2016';  // 16:9 — marge sous la borne pixels Azure
 
 /**
  * POST /images/edits — accepte 1 ou plusieurs images en input.
- * Sortie 16:9 natif si gpt-image-2, sinon fallback 3:2 + fit16x9 côté front.
- * `quality` : 'high' (~90-180s, défaut), 'medium' (~30-60s), 'low' (~10-20s).
+ * Sortie 16:9 natif (gpt-image-2). `quality` : 'high' (~90-180s, défaut),
+ * 'medium' (~30-60s), 'low' (~10-20s).
  */
 async function callImagesEdits(
   images: string[],
@@ -321,14 +321,14 @@ async function callImagesEdits(
     urlUsed = fallbackUrl;
   }
 
-  // Fallback taille : un déploiement gpt-image-1 / 1.5 refuse le 16:9 4K en 400
-  // ("size not supported"). On retombe alors sur le 3:2 qu'ils savent produire.
+  // Fallback taille : si une région/api-version refuse le 4K en 400 ("size"),
+  // on retente en 16:9 plus petit (FALLBACK_SIZE) — le cadrage reste correct.
   if (response.status === 400 && outputSize === PREFERRED_SIZE) {
     const errBody = await response.clone().text().catch(() => '');
     if (/\bsize\b/i.test(errBody)) {
       console.warn(
-        `[Azure /edits] size ${PREFERRED_SIZE} refusé (déploiement ≠ gpt-image-2 ?) — ` +
-        `fallback ${FALLBACK_SIZE}. Détail : ${errBody.slice(0, 200)}`
+        `[Azure /edits] size ${PREFERRED_SIZE} refusé — retry en 16:9 ${FALLBACK_SIZE}. ` +
+        `Détail : ${errBody.slice(0, 200)}`
       );
       outputSize = FALLBACK_SIZE;
       response = await postWithRetry429(urlUsed, () => buildInit(outputSize));
@@ -376,8 +376,8 @@ async function callImagesGenerations(prompt: string): Promise<string> {
     const errBody = await response.clone().text().catch(() => '');
     if (/\bsize\b/i.test(errBody)) {
       console.warn(
-        `[Azure /generations] size ${PREFERRED_SIZE} refusé (déploiement ≠ gpt-image-2 ?) — ` +
-        `fallback ${FALLBACK_SIZE}. Détail : ${errBody.slice(0, 200)}`
+        `[Azure /generations] size ${PREFERRED_SIZE} refusé — retry en 16:9 ${FALLBACK_SIZE}. ` +
+        `Détail : ${errBody.slice(0, 200)}`
       );
       outputSize = FALLBACK_SIZE;
       response = await postWithRetry429(urlUsed, () => buildInit(outputSize));
