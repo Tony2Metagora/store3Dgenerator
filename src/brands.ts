@@ -72,6 +72,51 @@ STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm pleine ouv
 À ÉVITER : visage différent du personnage source, bouche ouverte ou dents visibles, expression neutre/sévère/triste, plusieurs personnes, architecture modifiée, ombre incohérente, effet collage / découpage, style cartoon, texte illisible, watermark, cadrage trop large où le personnage devient minuscule.`;
 }
 
+// ─── Retouche avatar déjà en boutique ────────────────────
+
+/**
+ * Presets de pose du mode « Retoucher en boutique » — affichés en boutons
+ * cliquables qui pré-remplissent / complètent la consigne de retouche.
+ */
+export const AVATAR_POSE_PRESETS: { label: string; text: string }[] = [
+  { label: 'Bras le long du corps', text: 'baisse les deux bras le long du corps, posture droite et détendue' },
+  { label: 'Mains jointes devant', text: 'place les deux mains jointes devant le buste, dans une posture d\'accueil' },
+  { label: 'Bras croisés', text: 'croise les bras devant le buste, posture posée et assurée' },
+  { label: 'Main sur la hanche', text: 'pose une main sur la hanche, l\'autre bras le long du corps' },
+  { label: 'Regard caméra', text: 'oriente le visage et le regard bien droit vers la caméra' },
+  { label: 'Sourire léger', text: 'donne au personnage un léger sourire naturel et avenant' },
+];
+
+/**
+ * Prompt pour retoucher un avatar DÉJÀ intégré dans une boutique.
+ *
+ * Une seule image est fournie au modèle (avatar + décor déjà composés).
+ * On ne touche QUE le personnage selon la consigne ; le décor, le cadrage
+ * et le visage sont verrouillés. Utilisé en mode édition 1-image
+ * (Azure /images/edits ou Gemini editImageWithGemini).
+ *
+ * @param instruction  Consigne libre de l'utilisateur (pose, expression…).
+ */
+export function buildAvatarRetouchPrompt(instruction: string): string {
+  const c = (instruction || '').trim()
+    || 'ajuste légèrement la posture du personnage pour qu\'elle paraisse naturelle et détendue';
+  return `Retouche le personnage présent dans l'image fournie selon la consigne ci-dessous, SANS rien changer d'autre dans l'image.
+
+CONSIGNE DE RETOUCHE (priorité absolue) : ${c}
+
+CONSIGNES STRICTES :
+1. Modifie UNIQUEMENT ce que demande la consigne de retouche. Tout le reste de l'image doit rester identique au pixel près.
+2. Préserve EXACTEMENT le décor : architecture, boutique, vitrines, produits, étagères, sol, murs, éclairage et perspective. Si la nouvelle posture dégage une zone de fond auparavant masquée par le personnage, reconstitue ce fond dans la continuité exacte du décor existant (mêmes éléments, mêmes couleurs, même lumière).
+3. Préserve EXACTEMENT le cadrage : même angle de caméra, même focale, même zoom, même position et même échelle du personnage dans l'image. Ne recadre pas, ne dézoome pas, ne déplace pas le personnage.
+4. Préserve EXACTEMENT le visage, la coiffure, la morphologie, la carnation, la tenue et les accessoires du personnage — il doit rester strictement reconnaissable. Ne change ni l'identité ni les vêtements, sauf si la consigne de retouche le demande explicitement.
+5. Lumière, ombres portées et balance des blancs cohérentes : les zones modifiées reçoivent la même direction de lumière que le reste de la scène, sans effet « collage » ni « découpage ».
+6. Un seul personnage visible.
+
+STYLE : photographie d'intérieur ultra-réaliste, 4K, objectif 35 mm, lumière naturelle douce, format 16:9 paysage. Le rendu final doit être indiscernable d'une photo réelle.
+
+À ÉVITER : décor modifié ou déformé, cadrage / zoom / focale différents, personnage déplacé ou redimensionné, visage ou tenue altérés sans consigne, plusieurs personnes, ombres incohérentes, effet collage / détourage, style cartoon ou illustration, texte illisible, watermark.`;
+}
+
 // ─── Accessoires ─────────────────────────────────────────
 
 export type AccessoryCategory = 'bijou' | 'foulard' | 'sac' | 'ceinture';

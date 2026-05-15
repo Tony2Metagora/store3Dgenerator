@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   buildBrandPrompt,
   buildAvatarPrompt,
+  buildAvatarRetouchPrompt,
   buildAccessoryPrompt,
   ACCESSORY_DEFS,
+  AVATAR_POSE_PRESETS,
   getAccessoryDef,
   DEFAULT_AVATAR_CADRAGE,
   type AccessoryCategory,
@@ -35,6 +37,7 @@ import './styles.css';
 
 type Provider = 'gemini' | 'azure';
 type Tab = 'boutique' | 'avatar' | 'accessoires';
+type AvatarMode = 'fusion' | 'retouche';
 
 const PREVIEW_COUNT = 3;
 
@@ -68,6 +71,16 @@ export default function App() {
   const [boutiqueBgDragging, setBoutiqueBgDragging] = useState(false);
   const [avatarContext, setAvatarContext] = useState<string>(DEFAULT_AVATAR_CADRAGE);
   const [avatarPrompt, setAvatarPrompt] = useState<string>('');
+
+  // Avatar — sous-mode : 'fusion' (avatar + fond) | 'retouche' (1 image déjà en boutique)
+  const [avatarMode, setAvatarMode] = useState<AvatarMode>(
+    () => (localStorage.getItem('avatar_mode') as AvatarMode) || 'fusion'
+  );
+  const [retoucheImage, setRetoucheImage] = useState<string | null>(null);
+  const [retoucheName, setRetoucheName] = useState<string>('');
+  const [retoucheDragging, setRetoucheDragging] = useState(false);
+  const [retoucheInstruction, setRetoucheInstruction] = useState<string>('');
+  const [retouchePrompt, setRetouchePrompt] = useState<string>('');
 
   // Accessoires inputs (tab Accessoires) — 1 seul accessoire à intégrer parmi les types disponibles
   const [accStartImage, setAccStartImage] = useState<string | null>(null);
@@ -182,6 +195,11 @@ export default function App() {
     setAvatarPrompt(buildAvatarPrompt(avatarContext));
   }, [avatarContext]);
 
+  // Met à jour le prompt de retouche quand la consigne change
+  useEffect(() => {
+    setRetouchePrompt(buildAvatarRetouchPrompt(retoucheInstruction));
+  }, [retoucheInstruction]);
+
   // Persiste le tab actif et reset les variantes au changement
   useEffect(() => {
     localStorage.setItem('active_tab', activeTab);
@@ -192,6 +210,17 @@ export default function App() {
     setResultError(null);
     setAltSize(null);
   }, [activeTab]);
+
+  // Persiste le sous-mode avatar et reset les variantes au changement de mode
+  useEffect(() => {
+    localStorage.setItem('avatar_mode', avatarMode);
+    setVariants([]);
+    setVariantBadges([]);
+    setSelectedVariant(null);
+    setError(null);
+    setResultError(null);
+    setAltSize(null);
+  }, [avatarMode]);
 
   const selectedMouleData = moulesData[selectedMouleId] ?? null;
 
@@ -271,6 +300,41 @@ export default function App() {
     const file = e.dataTransfer.files?.[0];
     if (file) readBoutiqueBgFile(file);
   }, []);
+
+  // ─── Upload avatar déjà en boutique (tab Avatar, mode retouche) ───
+  const readRetoucheFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setRetoucheName(file.name);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setRetoucheImage(reader.result as string);
+      setVariants([]);
+      setSelectedVariant(null);
+      setError(null);
+      setResultError(null);
+    };
+    reader.readAsDataURL(file);
+  };
+  const handleRetoucheFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) readRetoucheFile(file);
+  };
+  const handleRetoucheDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setRetoucheDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) readRetoucheFile(file);
+  }, []);
+
+  // Ajoute un preset de pose à la consigne de retouche (cumulatif, séparé par « ; »)
+  const applyPosePreset = (text: string) => {
+    setRetoucheInstruction((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return text;
+      if (trimmed.toLowerCase().includes(text.toLowerCase())) return prev;
+      return `${trimmed} ; ${text}`;
+    });
+  };
 
   // ─── Uploads tab Accessoires ───
   const readAccStartFile = (file: File) => {
@@ -370,6 +434,33 @@ export default function App() {
       }
     } catch (err: unknown) {
       console.error('[handleGenerateAvatar] échec :', err);
+      setError(err instanceof Error ? err.message : 'Erreur inconnue.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Retouche d'un avatar déjà en boutique (tab Avatar, mode retouche) ───
+  // 1 seule image en entrée, 1 seule variante en sortie. Le décor, le cadrage
+  // et le visage sont verrouillés par buildAvatarRetouchPrompt — on réutilise
+  // le flux d'édition 1-image (Azure /images/edits ou Gemini editImageWithGemini).
+  const handleGenerateRetouche = async () => {
+    if (!retoucheImage) return;
+    setLoading(true);
+    setError(null);
+    setResultError(null);
+    setVariants([]);
+    setVariantBadges([]);
+    setSelectedVariant(null);
+    setAltSize(null);
+    try {
+      const result = provider === 'azure'
+        ? await editImageWithAzureOpenAI(retoucheImage, retouchePrompt)
+        : await editImageWithGemini(retoucheImage, retouchePrompt);
+      setVariants([result]);
+      setSelectedVariant(0);
+    } catch (err: unknown) {
+      console.error('[handleGenerateRetouche] échec :', err);
       setError(err instanceof Error ? err.message : 'Erreur inconnue.');
     } finally {
       setLoading(false);
@@ -553,6 +644,7 @@ export default function App() {
   const activeKey = provider === 'azure' ? azureKey : apiKey;
   const canGenerateBoutique = !!selectedMouleData && !!brandImage && !!activeKey && !loading;
   const canGenerateAvatar = !!avatarImage && !!boutiqueBgImage && !!activeKey && !loading;
+  const canGenerateRetouche = !!retoucheImage && !!activeKey && !loading;
   const canGenerateAccessoires =
     !!accStartImage && !!accImage && !!activeKey && !loading;
 
@@ -893,8 +985,40 @@ export default function App() {
           </div>
           </>)}
 
-          {/* TAB AVATAR — étapes 1 à 3 (avatar + fond → variantes fusionnées) */}
+          {/* TAB AVATAR — 2 sous-modes : fusion (avatar + fond) | retouche (1 image) */}
           {activeTab === 'avatar' && (<>
+            {/* Sélecteur de sous-mode */}
+            <div className="card" style={{ marginBottom: '1rem', padding: '0.4rem' }}>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {([
+                  { key: 'fusion' as AvatarMode, label: 'Avatar + fond' },
+                  { key: 'retouche' as AvatarMode, label: 'Retoucher en boutique' },
+                ]).map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setAvatarMode(m.key)}
+                    style={{
+                      flex: 1,
+                      padding: '0.55rem 1rem',
+                      border: 'none',
+                      borderRadius: '0.5rem',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      fontWeight: avatarMode === m.key ? 600 : 500,
+                      background: avatarMode === m.key ? 'var(--accent)' : 'transparent',
+                      color: avatarMode === m.key ? '#fff' : 'var(--text-muted)',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── MODE FUSION : avatar + fond → variantes fusionnées ── */}
+            {avatarMode === 'fusion' && (<>
             {/* Étape 1 — Upload avatar */}
             <div className="card">
               <h2><span className="step-num">1</span> Importer l&apos;avatar (personnage)</h2>
@@ -974,6 +1098,95 @@ export default function App() {
               {!boutiqueBgImage && <p className="hint">Importez le fond de boutique (étape 2).</p>}
               {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
             </div>
+            </>)}
+
+            {/* ── MODE RETOUCHE : 1 image avatar déjà en boutique → 1 variante ── */}
+            {avatarMode === 'retouche' && (<>
+            {/* Étape 1 — Image avatar déjà en boutique */}
+            <div className="card">
+              <h2><span className="step-num">1</span> Avatar déjà en boutique</h2>
+              <p className="hint" style={{ marginBottom: '0.6rem' }}>
+                Importez une image où le personnage est déjà intégré dans la boutique (ex. : une variante de « Avatar + fond » téléchargée puis ré-importée ici). Le décor est conservé tel quel — aucun fond à uploader.
+              </p>
+              <div
+                className={`upload-zone ${retoucheDragging ? 'dragging' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setRetoucheDragging(true); }}
+                onDragLeave={() => setRetoucheDragging(false)}
+                onDrop={handleRetoucheDrop}
+              >
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleRetoucheFileChange} />
+                <div className="icon">🖼️</div>
+                <p>Glissez-déposez ou cliquez pour sélectionner<br />l&apos;avatar déjà en boutique (JPEG / PNG / WebP)</p>
+              </div>
+              {retoucheImage && (
+                <div className="upload-preview">
+                  <img src={retoucheImage} alt={retoucheName} />
+                </div>
+              )}
+            </div>
+
+            {/* Étape 2 — Modification souhaitée */}
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2><span className="step-num">2</span> Modification souhaitée</h2>
+              <div className="field">
+                <label>Poses rapides (cliquez pour compléter la consigne)</label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                  {AVATAR_POSE_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => applyPosePreset(p.text)}
+                      style={{
+                        padding: '0.45rem 0.85rem',
+                        border: '1px solid #d4d4d8',
+                        background: '#fff',
+                        color: '#27272a',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                        fontSize: '0.85rem',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="field" style={{ marginTop: '0.8rem' }}>
+                <label htmlFor="retoucheInstruction">Consigne de retouche</label>
+                <textarea
+                  id="retoucheInstruction"
+                  value={retoucheInstruction}
+                  onChange={(e) => setRetoucheInstruction(e.target.value)}
+                  placeholder="Ex. : baisse le bras droit le long du corps, posture détendue"
+                  rows={4}
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                  ⓘ Le décor, le cadrage et le visage sont conservés à l&apos;identique — seul le personnage est retouché selon cette consigne.
+                </p>
+              </div>
+              <details className="prompt-details">
+                <summary>Prompt complet généré (modifiable)</summary>
+                <textarea value={retouchePrompt} onChange={(e) => setRetouchePrompt(e.target.value)} rows={10} />
+              </details>
+            </div>
+
+            {/* Étape 3 — Générer la retouche */}
+            <div className="card" style={{ marginTop: '1rem' }}>
+              <h2><span className="step-num">3</span> Générer la retouche</h2>
+              <button
+                className="btn-generate"
+                disabled={!canGenerateRetouche}
+                onClick={handleGenerateRetouche}
+              >
+                {loading ? 'Retouche en cours…' : 'Générer la retouche'}
+              </button>
+              {error && <div className="error-msg">{error}</div>}
+              {!retoucheImage && <p className="hint">Importez l&apos;avatar déjà en boutique (étape 1).</p>}
+              {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
+            </div>
+            </>)}
           </>)}
 
           {/* TAB ACCESSOIRES — étape 1 image de départ, étape 2 sélecteur catégorie + image accessoire, étape 3 générer 3 variantes */}
@@ -1126,7 +1339,9 @@ export default function App() {
             <div className="loading">
               <div className="spinner" />
               <p>
-                {activeTab === 'accessoires'
+                {activeTab === 'avatar' && avatarMode === 'retouche'
+                  ? `Retouche en cours… 1 variante, ${provider === 'azure' ? '~2-4 min (Azure GPT Image).' : '10-30 secondes (Gemini).'}`
+                  : activeTab === 'accessoires'
                   ? accAnalyzing
                     ? `Analyse Vision de l’accessoire en cours… (~5-15s) — l’IA décrit matériau, couleur et dimensions réelles pour cadrer le rendu.`
                     : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (Azure GPT image medium), soit ~2-3 min au total. Upscale Magnific x4 dispo après sélection.' : '10-30 secondes.'}`
@@ -1246,7 +1461,9 @@ export default function App() {
             </div>
           ) : (
             <div className="preview-placeholder">
-              {activeTab === 'accessoires'
+              {activeTab === 'avatar' && avatarMode === 'retouche'
+                ? 'Le résultat de la retouche apparaîtra ici (1 image).'
+                : activeTab === 'accessoires'
                 ? 'Le résultat de la composition apparaîtra ici (1 image par accessoire ajouté).'
                 : `Les ${PREVIEW_COUNT} variantes apparaîtront ici après la génération.`}
             </div>
