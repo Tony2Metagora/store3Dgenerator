@@ -491,7 +491,7 @@ export default function App() {
   // ─── Génération 3 variantes accessoire (tab Accessoires) ───
   // 1 seul accessoire choisi (catégorie + image), 3 variantes en parallèle/séquentiel
   // selon provider. Azure tourne en quality=medium pour rester sous ~30-60s par variante
-  // (l'utilisateur peut upscaler la variante choisie via Magnific x4 en post).
+  // (l'utilisateur peut upscaler la variante choisie via Magnific en post).
   const handleGenerateAccessories = async () => {
     if (!accStartImage || !accImage) return;
     const acc = getAccessoryDef(accCategory);
@@ -604,7 +604,7 @@ export default function App() {
     setUpscaling(true);
     setResultError(null);
     try {
-      const upscaled = await upscaleWithMagnific(activeImage, { scale: 4 });
+      const upscaled = await upscaleWithMagnific(activeImage);
       setVariants((prev) => prev.map((v, i) => (i === selectedVariant ? upscaled : v)));
       setAltSize(null);
     } catch (err: unknown) {
@@ -773,7 +773,7 @@ export default function App() {
             )}
 
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem', borderTop: '1px dashed var(--border)', paddingTop: '0.75rem' }}>
-              🔍 L&apos;upscale Magnific x4 passe par un proxy serveur (clé Freepik côté serveur) — rien à configurer ici.
+              🔍 L&apos;upscale Magnific passe par un proxy serveur (clé Freepik côté serveur) — rien à configurer ici.
             </p>
 
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
@@ -1340,7 +1340,7 @@ export default function App() {
               <p className="hint" style={{ marginBottom: '0.6rem' }}>
                 Importez n&apos;importe quelle image. Une fois chargée, utilisez le panneau de
                 droite pour la <strong>modifier au prompt</strong> (« Modifier ») et/ou
-                l&apos;<strong>améliorer</strong> (« Upscale Magnific x4 »).
+                l&apos;<strong>améliorer</strong> (« Upscale Magnific »).
               </p>
               <div
                 className={`upload-zone ${modifDragging ? 'dragging' : ''}`}
@@ -1380,7 +1380,7 @@ export default function App() {
                   : activeTab === 'accessoires'
                   ? accAnalyzing
                     ? `Analyse Vision de l’accessoire en cours… (~5-15s) — l’IA décrit matériau, couleur et dimensions réelles pour cadrer le rendu.`
-                    : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (Azure GPT image medium), soit ~2-3 min au total. Upscale Magnific x4 dispo après sélection.' : '10-30 secondes.'}`
+                    : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '30-90s par variante (Azure GPT image medium), soit ~2-3 min au total. Upscale Magnific dispo après sélection.' : '10-30 secondes.'}`
                   : `${PREVIEW_COUNT} variantes en cours… ${provider === 'azure' ? '2-4 min par variante (séquentiel Azure GPT image).' : '10-30 secondes.'}`}
               </p>
             </div>
@@ -1459,9 +1459,9 @@ export default function App() {
                       className="btn-action btn-upscale"
                       onClick={handleUpscale}
                       disabled={isBusy}
-                      title="Upscale x4 via Magnific Illusio (30s-2min)"
+                      title="Upscale via Magnific Illusio (30s-2min)"
                     >
-                      {upscaling ? '⏳ Upscale…' : '✨ Améliorer la qualité (Upscale Magnific x4)'}
+                      {upscaling ? '⏳ Upscale…' : '✨ Améliorer la qualité (Upscale Magnific)'}
                     </button>
                     <button className="btn-action btn-download-action" onClick={handleDownload} disabled={isBusy}>
                       💾 Télécharger

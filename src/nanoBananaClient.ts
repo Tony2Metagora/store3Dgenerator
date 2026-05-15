@@ -31,6 +31,12 @@ export const TARGET_HEIGHT = 2056;
 export const TARGET_WIDTH = Math.round((TARGET_HEIGHT * 16) / 9); // 3656
 const MAX_BYTES = 3 * 1024 * 1024; // 3 Mo
 
+// Magnific (Freepik) plafonne la taille de SORTIE de l'upscale à 25,3 Mpx.
+// On upscale en 2x → la sortie fait 4× les pixels de l'entrée, donc l'image
+// envoyée doit rester sous ~6,25 Mpx (sinon HTTP 400 "exceeds maximum size").
+const MAGNIFIC_MAX_OUTPUT_PX = 25_000_000;                 // marge sous les 25,3 Mpx
+const MAGNIFIC_MAX_INPUT_PX = MAGNIFIC_MAX_OUTPUT_PX / 4;  // 2x → ×4 pixels
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -38,6 +44,38 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error('Impossible de charger l\'image pour le post-traitement'));
     img.src = src;
   });
+}
+
+/**
+ * Réduit une image pour qu'elle ne dépasse pas `maxPixels` (largeur × hauteur),
+ * en préservant le ratio. No-op si elle est déjà sous la limite. Sortie JPEG
+ * compressée < 3 Mo.
+ */
+async function downscaleToMaxPixels(dataUrl: string, maxPixels: number): Promise<string> {
+  const img = await loadImage(dataUrl);
+  const px = img.width * img.height;
+  if (px <= maxPixels) return dataUrl;
+
+  const ratio = Math.sqrt(maxPixels / px);
+  const w = Math.floor(img.width * ratio);
+  const h = Math.floor(img.height * ratio);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas context indisponible');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+
+  let quality = 0.95;
+  let result = canvas.toDataURL('image/jpeg', quality);
+  while (result.length * 0.75 > MAX_BYTES && quality > 0.5) {
+    quality -= 0.04;
+    result = canvas.toDataURL('image/jpeg', quality);
+  }
+  return result;
 }
 
 /**
@@ -269,16 +307,18 @@ export async function editImageWithGemini(
  */
 export async function upscaleWithMagnific(
   imageDataUrl: string,
-  opts: { scale?: 2 | 4 | 8 | 16; creativity?: number; resemblance?: number } = {}
+  opts: { creativity?: number; resemblance?: number } = {}
 ): Promise<string> {
   if (!imageDataUrl.startsWith('data:image/')) throw new Error('Image invalide (data URL attendue).');
 
-  const m = imageDataUrl.match(/^data:image\/[a-zA-Z+]+;base64,(.+)$/s);
+  // Magnific plafonne la sortie à 25,3 Mpx. On upscale en 2x (sortie = entrée
+  // × 4) → on réduit d'abord l'image si elle dépasse ~6,25 Mpx (les variantes
+  // de l'app font 3656×2056 ≈ 7,5 Mpx → léger downscale avant l'envoi).
+  const prepared = await downscaleToMaxPixels(imageDataUrl, MAGNIFIC_MAX_INPUT_PX);
+  const m = prepared.match(/^data:image\/[a-zA-Z+]+;base64,(.+)$/s);
   if (!m) throw new Error('Format data URL invalide');
   const imageB64 = m[1];
-
-  const scaleNum = opts.scale ?? 4;
-  const scale_factor = scaleNum >= 16 ? '16x' : scaleNum >= 8 ? '8x' : scaleNum >= 4 ? '4x' : '2x';
+  const scale_factor = '2x';
 
   // 1. Création du job (via le proxy Vercel — pas de clé côté client)
   const createRes = await fetch(MAGNIFIC_PROXY, {
