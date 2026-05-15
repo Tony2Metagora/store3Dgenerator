@@ -11,7 +11,8 @@
 //   POST /api/magnific            → crée le job d'upscale (corps JSON relayé à Freepik)
 //   GET  /api/magnific?taskId=ID  → interroge le statut du job
 //
-// Variable d'environnement REQUISE : FREEPIK_API_KEY
+// Variable d'environnement REQUISE : FREEPIK_API_KEY (ou freepik_api_key — les
+// deux casses sont acceptées).
 
 const FREEPIK_UPSCALER = 'https://api.freepik.com/v1/ai/image-upscaler';
 
@@ -42,10 +43,13 @@ export default async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.FREEPIK_API_KEY;
+  // Nom de variable tolérant à la casse : FREEPIK_API_KEY (canonique) OU
+  // freepik_api_key (casse historique réutilisée depuis l'ancienne clé
+  // localStorage). Les variables d'env Vercel sont sensibles à la casse.
+  const apiKey = process.env.FREEPIK_API_KEY || process.env.freepik_api_key;
   if (!apiKey) {
     res.status(500).json({
-      error: 'FREEPIK_API_KEY absente : ajoutez-la dans Vercel → Settings → Environment Variables, puis redéployez.',
+      error: 'Clé Freepik absente : ajoutez la variable FREEPIK_API_KEY (ou freepik_api_key) dans Vercel → Settings → Environment Variables (scope Production), puis redéployez.',
     });
     return;
   }

@@ -9,9 +9,11 @@ relaie les requêtes et renvoie les bons en-têtes CORS.
 
 ## Variable d'environnement (obligatoire)
 
-| Nom               | Valeur                                          |
-|-------------------|-------------------------------------------------|
-| `FREEPIK_API_KEY` | Clé API Freepik (plan API — `FPSX…`)            |
+| Nom                                  | Valeur                               |
+|---------------------------------------|--------------------------------------|
+| `FREEPIK_API_KEY` (ou `freepik_api_key`) | Clé API Freepik (plan API — `FPSX…`) |
+
+Le code accepte les deux casses ; `FREEPIK_API_KEY` reste le nom recommandé.
 
 À définir dans **Vercel → Project → Settings → Environment Variables**
 (scope *Production*), puis redéployer.
