@@ -287,10 +287,17 @@ export async function upscaleWithMagnific(
     body: JSON.stringify({
       image: imageB64,
       scale_factor,
-      optimized_for: 'art_and_logos',
+      // optimized_for : profil de rendu Freepik (enum). 'films_n_photography'
+      // colle au contenu de l'app (boutiques + avatars photoréalistes).
+      // Valeurs valides : standard, soft_portraits, hard_portraits,
+      // art_n_illustration, videogame_assets, nature_n_landscapes,
+      // films_n_photography, 3d_renders, science_fiction_n_horror.
+      optimized_for: 'films_n_photography',
+      // creativity / hdr / resemblance / fractality : échelle Freepik -10..10
+      // (0 = neutre). resemblance positif = upscale fidèle à l'image d'origine.
       creativity: opts.creativity ?? 3,
       hdr: 5,
-      resemblance: opts.resemblance ?? 70,
+      resemblance: opts.resemblance ?? 6,
       fractality: 1,
       engine: 'magnific_illusio',
     }),
