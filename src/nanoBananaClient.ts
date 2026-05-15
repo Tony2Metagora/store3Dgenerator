@@ -295,7 +295,7 @@ export async function editImageWithGemini(
 }
 
 /**
- * Upscale via Magnific Illusio (API Freepik).
+ * Upscale via Magnific (API Freepik, moteur magnific_sparkle).
  *
  * Les appels API (création du job + polling) passent par le proxy Vercel
  * MAGNIFIC_PROXY : la clé Freepik reste côté serveur et le CORS est géré
@@ -327,19 +327,26 @@ export async function upscaleWithMagnific(
     body: JSON.stringify({
       image: imageB64,
       scale_factor,
-      // optimized_for : profil de rendu Freepik (enum). 'films_n_photography'
-      // colle au contenu de l'app (boutiques + avatars photoréalistes).
-      // Valeurs valides : standard, soft_portraits, hard_portraits,
-      // art_n_illustration, videogame_assets, nature_n_landscapes,
-      // films_n_photography, 3d_renders, science_fiction_n_horror.
+      // engine : 'magnific_sparkle' = moteur ÉQUILIBRÉ — améliorations subtiles
+      // qui préservent la structure et les matières organiques (peau, tissu)
+      // sans sur-accentuer. L'ancien 'magnific_illusio' est conçu pour les
+      // ILLUSTRATIONS et AJOUTE du détail imaginatif → il inventait de fausses
+      // veines / un teint vieilli sur la peau des avatars.
+      engine: 'magnific_sparkle',
+      // optimized_for : profil de rendu (enum Freepik). 'films_n_photography'
+      // pour du contenu photographique réaliste.
       optimized_for: 'films_n_photography',
-      // creativity / hdr / resemblance / fractality : échelle Freepik -10..10
-      // (0 = neutre). resemblance positif = upscale fidèle à l'image d'origine.
-      creativity: opts.creativity ?? 3,
-      hdr: 5,
-      resemblance: opts.resemblance ?? 6,
-      fractality: 1,
-      engine: 'magnific_illusio',
+      // Réglages CONSERVATEURS (échelle -10..10, 0 = neutre) : on veut un
+      // upscale FIDÈLE, pas un re-render créatif. creativity négatif = ne rien
+      // inventer ; hdr neutre = ne pas accentuer le micro-contraste de la peau ;
+      // resemblance haut = coller au visage et à la peau d'origine.
+      creativity: opts.creativity ?? -6,
+      hdr: 0,
+      resemblance: opts.resemblance ?? 9,
+      fractality: 0,
+      // Prompt court orienté fidélité (Freepik le recommande pour les images IA).
+      prompt:
+        'Ultra-realistic high-resolution photograph. Smooth, natural, youthful skin with even tone. Preserve the subject exactly as in the source — do not add wrinkles, visible veins, age spots or skin blemishes.',
     }),
   });
   if (!createRes.ok) {

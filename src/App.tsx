@@ -1459,7 +1459,7 @@ export default function App() {
                       className="btn-action btn-upscale"
                       onClick={handleUpscale}
                       disabled={isBusy}
-                      title="Upscale via Magnific Illusio (30s-2min)"
+                      title="Upscale via Magnific (30s-2min)"
                     >
                       {upscaling ? '⏳ Upscale…' : '✨ Améliorer la qualité (Upscale Magnific)'}
                     </button>
