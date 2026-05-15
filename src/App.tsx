@@ -19,6 +19,7 @@ import {
   editImageWithGemini,
   refineImageQuality,
   resizeToTargetHeight,
+  padToAzureEditRatio,
   upscaleWithMagnific,
   getImageSize,
   TARGET_WIDTH,
@@ -415,9 +416,15 @@ export default function App() {
 
       // 2. Génération des 3 variantes avec le prompt enrichi du brief Vision.
       const prompt = buildAccessoryPrompt(acc, accExtraInstruction, visionDescription);
+      // Azure /edits ne sort que du 3:2 → on pad l'image de départ 16:9 au
+      // ratio Azure pour que le modèle édite sans recomposer (centrage du
+      // personnage préservé). Gemini sort du 16:9 natif → pas de pad.
+      const startForGen = provider === 'azure'
+        ? await padToAzureEditRatio(accStartImage)
+        : accStartImage;
       const results = provider === 'azure'
-        ? await callAzureOpenAIBatch(accStartImage, accImage, prompt, PREVIEW_COUNT, 'medium')
-        : await callNanoBananaBatch(accStartImage, accImage, prompt, PREVIEW_COUNT);
+        ? await callAzureOpenAIBatch(startForGen, accImage, prompt, PREVIEW_COUNT, 'medium')
+        : await callNanoBananaBatch(startForGen, accImage, prompt, PREVIEW_COUNT);
       if (results.length === 0) {
         setError(
           `Aucune variante générée. Vérifiez votre ${provider === 'azure' ? 'clé Azure OpenAI' : 'clé Gemini'} et la console F12 pour le détail.`

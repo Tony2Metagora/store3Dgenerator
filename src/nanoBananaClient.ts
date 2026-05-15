@@ -85,6 +85,64 @@ export async function fit16x9AndCompress(dataUrl: string): Promise<string> {
 }
 
 /**
+ * Ratio de sortie de gpt-image en mode paysage : 1536×1024 = 3:2.
+ * gpt-image ne sait pas produire du 16:9 natif — d'où ce ratio intermédiaire.
+ */
+export const AZURE_EDIT_RATIO = 1536 / 1024; // 1.5
+
+/**
+ * Prépare une image 16:9 pour un /images/edits Azure SANS déclencher de
+ * recomposition.
+ *
+ * Problème : gpt-image /edits ne sort que du 3:2 (1536×1024). Si on lui envoie
+ * un 16:9 et qu'on lui demande un 3:2, le modèle DOIT re-cadrer — et il en
+ * profite pour décaler / recomposer le personnage (perte du centrage).
+ *
+ * Solution : on pad l'image 16:9 avec des bandes haut/bas pour atteindre
+ * exactement le 3:2 d'Azure. Entrée et sortie ont alors le MÊME ratio → le
+ * modèle édite "sur place" sans recomposer. Les bandes ajoutées sont
+ * EXACTEMENT celles que fit16x9AndCompress recadrera ensuite : la scène
+ * d'origine est restituée au pixel près, personnage centré inclus.
+ *
+ * Les bandes sont remplies d'une version étirée + floutée de l'image (et non
+ * du noir) pour éviter que le modèle ne "corrige" des bandes vides en y
+ * générant du décor.
+ *
+ * No-op si l'image n'est pas plus large que le 3:2 cible.
+ */
+export async function padToAzureEditRatio(dataUrl: string): Promise<string> {
+  const img = await loadImage(dataUrl);
+  const srcRatio = img.width / img.height;
+  if (srcRatio <= AZURE_EDIT_RATIO + 0.01) return dataUrl;
+
+  const canvasW = img.width;
+  const canvasH = Math.round(img.width / AZURE_EDIT_RATIO);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas context indisponible');
+
+  // Fond : image étirée plein cadre puis floutée → bandes haut/bas "douces".
+  ctx.filter = 'blur(24px)';
+  ctx.drawImage(img, 0, 0, canvasW, canvasH);
+  ctx.filter = 'none';
+
+  // Image native, centrée verticalement (bandes symétriques haut/bas).
+  const dy = Math.round((canvasH - img.height) / 2);
+  ctx.drawImage(img, 0, dy, img.width, img.height);
+
+  let quality = 0.95;
+  let result = canvas.toDataURL('image/jpeg', quality);
+  while (result.length * 0.75 > MAX_BYTES && quality > 0.5) {
+    quality -= 0.04;
+    result = canvas.toDataURL('image/jpeg', quality);
+  }
+  return result;
+}
+
+/**
  * Redimensionne vers exactement TARGET_HEIGHT en préservant le ratio source
  * (pas de crop). Utile pour une image alt uploadée manuellement.
  */
