@@ -34,7 +34,7 @@ import { analyzeAccessorySafe } from './visionClient';
 import './styles.css';
 
 type Provider = 'gemini' | 'azure';
-type Tab = 'boutique' | 'avatar' | 'accessoires';
+type Tab = 'boutique' | 'avatar' | 'accessoires' | 'modification';
 type AvatarMode = 'fusion' | 'retouche';
 
 const PREVIEW_COUNT = 3;
@@ -89,6 +89,9 @@ export default function App() {
   const [accName, setAccName] = useState<string>('');
   const [accDragging, setAccDragging] = useState<boolean>(false);
   const [accExtraInstruction, setAccExtraInstruction] = useState<string>('');
+
+  // Modification libre (tab Modification) — image quelconque uploadée à retoucher
+  const [modifDragging, setModifDragging] = useState(false);
 
   // Preview variants
   const [variants, setVariants] = useState<string[]>([]);
@@ -373,6 +376,35 @@ export default function App() {
     setAccImage(null);
     setAccName('');
   };
+
+  // ─── Upload tab Modification (image libre à retoucher) ───
+  // L'image importée est poussée directement dans `variants` : le panneau de
+  // droite (preview + Modifier au prompt + Upscale + Télécharger) fait le reste.
+  const readModifFile = (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const dataUrl = reader.result as string;
+      setVariants([dataUrl]);
+      setVariantBadges(['Image importée']);
+      setSelectedVariant(0);
+      setError(null);
+      setResultError(null);
+      setAltSize(await getImageSize(dataUrl));
+    };
+    reader.readAsDataURL(file);
+  };
+  const handleModifFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) readModifFile(file);
+    e.target.value = '';
+  };
+  const handleModifDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setModifDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) readModifFile(file);
+  }, []);
 
   // ─── Génération 3 variantes en parallèle (dispatch selon provider) ───
   const handleGenerate = async () => {
@@ -758,6 +790,7 @@ export default function App() {
             { key: 'boutique' as Tab, label: 'Fond de boutique' },
             { key: 'avatar' as Tab, label: 'Avatar dans boutique' },
             { key: 'accessoires' as Tab, label: 'Accessoires' },
+            { key: 'modification' as Tab, label: 'Modification' },
           ]).map((t) => (
             <button
               key={t.key}
@@ -1299,6 +1332,39 @@ export default function App() {
               {!activeKey && <p className="hint">Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} dans les paramètres API.</p>}
             </div>
           </>)}
+
+          {/* TAB MODIFICATION — upload libre, retouche + upscale via le panneau de droite */}
+          {activeTab === 'modification' && (
+            <div className="card">
+              <h2><span className="step-num">1</span> Importer une image</h2>
+              <p className="hint" style={{ marginBottom: '0.6rem' }}>
+                Importez n&apos;importe quelle image. Une fois chargée, utilisez le panneau de
+                droite pour la <strong>modifier au prompt</strong> (« Modifier ») et/ou
+                l&apos;<strong>améliorer</strong> (« Upscale Magnific x4 »).
+              </p>
+              <div
+                className={`upload-zone ${modifDragging ? 'dragging' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setModifDragging(true); }}
+                onDragLeave={() => setModifDragging(false)}
+                onDrop={handleModifDrop}
+              >
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleModifFileChange} />
+                <div className="icon">🖼️</div>
+                <p>Glissez-déposez ou cliquez pour importer<br />une image à retoucher (JPEG / PNG / WebP)</p>
+              </div>
+              {variants.length > 0 && (
+                <p className="hint" style={{ marginTop: '0.6rem' }}>
+                  ✓ Image chargée — voir le panneau de droite. Réimportez ici pour en changer.
+                </p>
+              )}
+              {!activeKey && (
+                <p className="hint">
+                  Renseignez votre clé {provider === 'azure' ? 'Azure OpenAI' : 'Gemini'} (Paramètres API)
+                  pour pouvoir modifier l&apos;image au prompt.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ── Colonne droite : Previews + Actions ── */}
@@ -1367,7 +1433,9 @@ export default function App() {
                   {resultError && <div className="error-msg" style={{ marginTop: '0.75rem' }}>{resultError}</div>}
 
                   <div className="result-section" style={{ marginTop: '1rem' }}>
-                    <label className="result-section-label">Modifier la variante sélectionnée</label>
+                    <label className="result-section-label">
+                      {activeTab === 'modification' ? 'Modifier l’image au prompt' : 'Modifier la variante sélectionnée'}
+                    </label>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <textarea
                         className="edit-prompt-input"
@@ -1425,7 +1493,9 @@ export default function App() {
             </div>
           ) : (
             <div className="preview-placeholder">
-              {activeTab === 'avatar' && avatarMode === 'retouche'
+              {activeTab === 'modification'
+                ? 'Importez une image à gauche : elle apparaîtra ici, prête à être modifiée au prompt et upscalée.'
+                : activeTab === 'avatar' && avatarMode === 'retouche'
                 ? 'Le résultat de la retouche apparaîtra ici (1 image).'
                 : activeTab === 'accessoires'
                 ? 'Le résultat de la composition apparaîtra ici (1 image par accessoire ajouté).'
